@@ -5,6 +5,7 @@ from typing import Optional, Sequence, Tuple
 import numpy as np
 from PySide6.QtGui import QColor
 
+from .color_model import BubbleColorPrediction, predict_bubble_text_color
 
 def _clamp_bbox_to_image(
     bbox: Sequence[float], image_shape: Tuple[int, ...], inset_ratio: float = 0.1
@@ -40,24 +41,6 @@ def _clamp_bbox_to_image(
     return x1, y1, x2, y2
 
 
-def _relative_luminance(rgb: Sequence[float]) -> float:
-    """Compute relative luminance for RGB values in range [0, 1]."""
-    def channel_lum(channel: float) -> float:
-        if channel <= 0.03928:
-            return channel / 12.92
-        return ((channel + 0.055) / 1.055) ** 2.4
-
-    r, g, b = (channel_lum(float(c)) for c in rgb)
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b
-
-
-def _contrast_ratio(l1: float, l2: float) -> float:
-    """Return WCAG contrast ratio between two relative luminance values."""
-    lighter = max(l1, l2)
-    darker = min(l1, l2)
-    return (lighter + 0.05) / (darker + 0.05)
-
-
 def determine_text_outline_colors(
     image: Optional[np.ndarray],
     bbox: Sequence[float],
@@ -66,11 +49,13 @@ def determine_text_outline_colors(
 ) -> Tuple[QColor, QColor]:
     """Determine contrasting text and outline colors for a bounding box.
 
-    The utility currently evaluates black and white as text candidates and
-    chooses the option with the stronger WCAG contrast against the sampled
-    background. Consequently a darker background such as saturated blues will
-    receive white text (outlined in black), while a lighter region will be
-    rendered with black text (outlined in white).
+    Instead of relying purely on luminance heuristics, this routine now samples
+    the bubble background, summarises its colour distribution, and feeds those
+    features into a lightweight logistic model that was fitted on hand-labelled
+    manhwa bubbles. The model predicts whether light or dark typography provides
+    better contrast given the sampled region and the appropriate outline colour
+    is paired automatically. If sampling or inference fails we gracefully fall
+    back to the provided defaults.
     """
     default_text = fallback_text if fallback_text is not None else QColor("#000000")
     default_outline = fallback_outline if fallback_outline is not None else QColor("#FFFFFF")
@@ -92,27 +77,25 @@ def determine_text_outline_colors(
     elif region.shape[2] > 3:
         region = region[:, :, :3]
 
-    region_float = region.astype(np.float32) / 255.0
-    mean_rgb = region_float.reshape(-1, region_float.shape[2]).mean(axis=0)
+    prediction: Optional[BubbleColorPrediction] = None
+    try:
+        prediction = predict_bubble_text_color(region)
+    except Exception:
+        prediction = None
 
-    bg_luminance = _relative_luminance(mean_rgb)
+    if prediction is None:
+        return default_text, default_outline
 
-    candidates = [QColor("#000000"), QColor("#FFFFFF")]
-    best_text = default_text
-    best_contrast = -1.0
+    light_text = QColor("#FFFFFF")
+    dark_text = default_text
+    light_outline = default_outline
+    dark_outline = QColor("#000000")
 
-    for candidate in candidates:
-        candidate_lum = _relative_luminance(
-            (candidate.redF(), candidate.greenF(), candidate.blueF())
-        )
-        contrast = _contrast_ratio(bg_luminance, candidate_lum)
-        if contrast > best_contrast:
-            best_contrast = contrast
-            best_text = candidate
+    if prediction.use_light_text:
+        text_color = light_text
+        outline = dark_outline
+    else:
+        text_color = dark_text
+        outline = light_outline
 
-    if best_contrast < 0:
-        best_text = default_text
-
-    outline = QColor("#FFFFFF") if best_text.name().lower() == "#000000" else QColor("#000000")
-
-    return best_text, outline
+    return text_color, outline
