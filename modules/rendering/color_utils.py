@@ -64,7 +64,14 @@ def determine_text_outline_colors(
     fallback_text: Optional[QColor] = None,
     fallback_outline: Optional[QColor] = None,
 ) -> Tuple[QColor, QColor]:
-    """Determine contrasting text and outline colors for a bounding box."""
+    """Determine contrasting text and outline colors for a bounding box.
+
+    The utility currently evaluates black and white as text candidates and
+    chooses the option with the stronger WCAG contrast against the sampled
+    background. Consequently a darker background such as saturated blues will
+    receive white text (outlined in black), while a lighter region will be
+    rendered with black text (outlined in white).
+    """
     default_text = fallback_text if fallback_text is not None else QColor("#000000")
     default_outline = fallback_outline if fallback_outline is not None else QColor("#FFFFFF")
 
