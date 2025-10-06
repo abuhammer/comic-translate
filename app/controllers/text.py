@@ -61,15 +61,25 @@ class TextController:
 
         render_settings = self.render_settings()
         font_family = render_settings.font_family
-        text_color_str = render_settings.color
-        text_color = QColor(text_color_str)
+        text_color_override = getattr(blk, 'font_color', None)
+        if text_color_override:
+            text_color = QColor(text_color_override)
+        else:
+            text_color = QColor(render_settings.color)
+        if not text_color.isValid():
+            text_color = QColor("#000000")
 
         id = render_settings.alignment_id
         alignment = self.main.button_to_alignment[id]
         line_spacing = float(render_settings.line_spacing)
-        outline_color_str = render_settings.outline_color
-        outline_color = QColor(outline_color_str) if self.main.outline_checkbox.isChecked() else None
-        outline_width = float(render_settings.outline_width)
+        outline_color_override = getattr(blk, 'outline_color', None)
+        if outline_color_override:
+            outline_color = QColor(outline_color_override)
+        else:
+            outline_color = QColor(render_settings.outline_color)
+        if not outline_color.isValid():
+            outline_color = QColor("#FFFFFF")
+        outline_width = max(float(render_settings.outline_width), 1.0)
         bold = render_settings.bold
         italic = render_settings.italic
         underline = render_settings.underline

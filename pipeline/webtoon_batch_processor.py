@@ -18,6 +18,7 @@ from modules.utils.pipeline_utils import inpaint_map, get_config, generate_mask,
 from modules.utils.translator_utils import format_translations
 from modules.utils.archives import make
 from modules.rendering.render import get_best_render_area, pyside_word_wrap
+from modules.rendering.color_utils import determine_text_outline_colors
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.save_renderer import ImageSaveRenderer
@@ -67,9 +68,13 @@ class WebtoonBatchProcessor:
         self.physical_page_results = defaultdict(list)  # physical_page_index -> merged results
         self.physical_page_status = defaultdict(lambda: PageStatus.UNPROCESSED)
         self.final_patches_for_save = defaultdict(list)
-        
+
         # Edge detection settings
         self.edge_threshold = 50  # pixels from edge to consider as "near edge"
+
+        # Background cache for dynamic text coloring
+        self._background_cache: dict[str, Optional[np.ndarray]] = {}
+        self._background_cache_keys: dict[str, int] = {}
         
     def skip_save(self, directory, timestamp, base_name, extension, archive_bname, image):
         path = os.path.join(directory, f"comic_translate_{timestamp}", "translated_images", archive_bname)
@@ -87,6 +92,50 @@ class WebtoonBatchProcessor:
                 file.write("Full Traceback:\n")
                 file.write(full_traceback + "\n")
             file.write("\n")
+
+    def _get_background_reference(self, image_path: str) -> Optional[np.ndarray]:
+        """Return an image with inpaint patches applied for color analysis."""
+        patches = self.final_patches_for_save.get(image_path, [])
+        patch_count = len(patches)
+        if (
+            self._background_cache_keys.get(image_path) == patch_count
+            and image_path in self._background_cache
+        ):
+            return self._background_cache[image_path]
+
+        base_image = imk.read_image(image_path)
+        if base_image is None:
+            self._background_cache[image_path] = None
+            self._background_cache_keys[image_path] = patch_count
+            return None
+
+        clean_image = base_image.copy()
+        height, width = clean_image.shape[:2]
+        for patch in patches:
+            bbox = patch.get('bbox')
+            patch_img = patch.get('image')
+            if patch_img is None or not bbox or len(bbox) != 4:
+                continue
+
+            x, y, w, h = [int(round(v)) for v in bbox]
+            if w <= 0 or h <= 0:
+                continue
+
+            if x >= width or y >= height:
+                continue
+
+            patch_height, patch_width = patch_img.shape[:2]
+            w_use = min(w, patch_width, width - x)
+            h_use = min(h, patch_height, height - y)
+
+            if w_use <= 0 or h_use <= 0:
+                continue
+
+            clean_image[y:y + h_use, x:x + w_use] = patch_img[:h_use, :w_use]
+
+        self._background_cache[image_path] = clean_image
+        self._background_cache_keys[image_path] = patch_count
+        return clean_image
 
     def _create_virtual_chunk_image(self, vpage1: VirtualPage, vpage2: VirtualPage) -> Tuple[np.ndarray, List[Dict]]:
         """
@@ -714,14 +763,20 @@ class WebtoonBatchProcessor:
 
         # Prepare render settings
         render_settings = self.main_page.render_settings()
-        font, font_color = render_settings.font_family, QColor(render_settings.color)
+        font = render_settings.font_family
+        font_color = QColor(render_settings.color)
+        if not font_color.isValid():
+            font_color = QColor("#000000")
         max_font_size, min_font_size = render_settings.max_font_size, render_settings.min_font_size
-        line_spacing, outline_width = float(render_settings.line_spacing), float(render_settings.outline_width)
-        outline_color, outline = QColor(render_settings.outline_color), render_settings.outline
+        line_spacing = float(render_settings.line_spacing)
+        outline_width = max(float(render_settings.outline_width), 1.0)
+        outline_color = QColor(render_settings.outline_color)
+        if not outline_color.isValid():
+            outline_color = QColor("#FFFFFF")
         bold, italic, underline = render_settings.bold, render_settings.italic, render_settings.underline
         alignment = self.main_page.button_to_alignment[render_settings.alignment_id]
         direction = render_settings.direction
-        
+
         # Get target language code for formatting
         target_lang = self.main_page.image_states[image_path]['target_lang']
         target_lang_en = self.main_page.lang_mapping.get(target_lang, None)
@@ -730,6 +785,8 @@ class WebtoonBatchProcessor:
         page_y_position_in_scene = 0
         if webtoon_manager and vpage.physical_page_index < len(webtoon_manager.image_positions):
             page_y_position_in_scene = webtoon_manager.image_positions[vpage.physical_page_index]
+
+        background_reference = self._get_background_reference(image_path)
 
         # Process each block
         for blk_virtual in blk_list_virtual:
@@ -748,6 +805,15 @@ class WebtoonBatchProcessor:
             if any(lang in trg_lng_cd.lower() for lang in ['zh', 'ja', 'th']):
                 translation = translation.replace(' ', '')
 
+            dynamic_text_color, dynamic_outline_color = determine_text_outline_colors(
+                background_reference,
+                physical_coords,
+                fallback_text=font_color,
+                fallback_outline=outline_color,
+            )
+            blk_virtual.font_color = dynamic_text_color.name()
+            blk_virtual.outline_color = dynamic_outline_color.name()
+
             render_blk = blk_virtual.deep_copy()
             render_blk.xyxy = list(physical_coords)
             if render_blk.bubble_xyxy:
@@ -761,6 +827,8 @@ class WebtoonBatchProcessor:
                 render_blk.bubble_xyxy[3] += page_y_position_in_scene
 
             render_blk.translation = translation
+            render_blk.font_color = blk_virtual.font_color
+            render_blk.outline_color = blk_virtual.outline_color
 
             if should_emit_live:
                 self.main_page.blk_rendered.emit(translation, font_size, render_blk)
@@ -774,10 +842,10 @@ class WebtoonBatchProcessor:
                 text=translation,
                 font_family=font,
                 font_size=font_size,
-                text_color=font_color,
+                text_color=dynamic_text_color,
                 alignment=alignment,
                 line_spacing=line_spacing,
-                outline_color=outline_color,
+                outline_color=dynamic_outline_color,
                 outline_width=outline_width,
                 bold=bold,
                 italic=italic,
@@ -790,13 +858,13 @@ class WebtoonBatchProcessor:
                 direction=direction,
                 selection_outlines=[
                     OutlineInfo(
-                        0, 
-                        len(translation), 
-                        outline_color, 
-                        outline_width, 
+                        0,
+                        len(translation),
+                        dynamic_outline_color,
+                        outline_width,
                         OutlineType.Full_Document
                     )
-                ] if outline else [],
+                ],
             )
             text_items_state.append(text_props.to_dict())
             page_blk_list.append(render_blk)

@@ -17,6 +17,7 @@ from modules.utils.pipeline_utils import inpaint_map, get_config, generate_mask,
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations
 from modules.utils.archives import make
 from modules.rendering.render import get_best_render_area, pyside_word_wrap
+from modules.rendering.color_utils import determine_text_outline_colors
 from modules.utils.device import resolve_device
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
 from app.ui.canvas.text.text_item_properties import TextItemProperties
@@ -307,25 +308,34 @@ class BatchProcessor:
             # Text Rendering
             render_settings = self.main_page.render_settings()
             upper_case = render_settings.upper_case
-            outline = render_settings.outline
             format_translations(blk_list, trg_lng_cd, upper_case=upper_case)
             get_best_render_area(blk_list, image, inpaint_input_img)
 
             font = render_settings.font_family
             font_color = QColor(render_settings.color)
+            if not font_color.isValid():
+                font_color = QColor("#000000")
 
             max_font_size = render_settings.max_font_size
             min_font_size = render_settings.min_font_size
-            line_spacing = float(render_settings.line_spacing) 
-            outline_width = float(render_settings.outline_width)
-            outline_color = QColor(render_settings.outline_color) 
+            line_spacing = float(render_settings.line_spacing)
+            outline_width = max(float(render_settings.outline_width), 1.0)
+            outline_color = QColor(render_settings.outline_color)
+            if not outline_color.isValid():
+                outline_color = QColor("#FFFFFF")
             bold = render_settings.bold
             italic = render_settings.italic
             underline = render_settings.underline
             alignment_id = render_settings.alignment_id
             alignment = self.main_page.button_to_alignment[alignment_id]
             direction = render_settings.direction
-                
+
+            background_reference = (
+                inpaint_input_img
+                if inpaint_input_img is not None and getattr(inpaint_input_img, "size", 0)
+                else image
+            )
+
             text_items_state = []
             for blk in blk_list:
                 x1, y1, width, height = blk.xywh
@@ -334,11 +344,20 @@ class BatchProcessor:
                 if not translation or len(translation) == 1:
                     continue
 
+                dynamic_text_color, dynamic_outline_color = determine_text_outline_colors(
+                    background_reference,
+                    blk.xyxy,
+                    fallback_text=font_color,
+                    fallback_outline=outline_color,
+                )
+                blk.font_color = dynamic_text_color.name()
+                blk.outline_color = dynamic_outline_color.name()
+
                 translation, font_size = pyside_word_wrap(translation, font, width, height,
                                                         line_spacing, outline_width, bold, italic, underline,
                                                         alignment, direction, max_font_size, min_font_size)
-                
-                # Display text if on current page  
+
+                # Display text if on current page
                 if image_path == file_on_display:
                     self.main_page.blk_rendered.emit(translation, font_size, blk)
 
@@ -351,10 +370,10 @@ class BatchProcessor:
                     text=translation,
                     font_family=font,
                     font_size=font_size,
-                    text_color=font_color,
+                    text_color=dynamic_text_color,
                     alignment=alignment,
                     line_spacing=line_spacing,
-                    outline_color=outline_color,
+                    outline_color=dynamic_outline_color,
                     outline_width=outline_width,
                     bold=bold,
                     italic=italic,
@@ -366,11 +385,14 @@ class BatchProcessor:
                     width=width,
                     direction=direction,
                     selection_outlines=[
-                        OutlineInfo(0, len(translation), 
-                        outline_color, 
-                        outline_width, 
-                        OutlineType.Full_Document)
-                    ] if outline else [],
+                        OutlineInfo(
+                            0,
+                            len(translation),
+                            dynamic_outline_color,
+                            outline_width,
+                            OutlineType.Full_Document,
+                        )
+                    ],
                 )
                 text_items_state.append(text_props.to_dict())
 
