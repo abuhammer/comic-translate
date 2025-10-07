@@ -18,7 +18,10 @@ class TextItemProperties:
     italic: bool = False
     underline: bool = False
     direction: Qt.LayoutDirection = Qt.LayoutDirection.LeftToRight
-    
+    bubble_fill: Optional[QColor] = None
+    bubble_padding: float = 0.0
+    bubble_corner_radius: float = 12.0
+
     # Position and transformation properties
     position: tuple = (0, 0)  # (x, y)
     rotation: float = 0
@@ -60,7 +63,16 @@ class TextItemProperties:
                 props.outline_color = QColor(data['outline_color'])
                 
         props.outline_width = data.get('outline_width', 1)
-        
+
+        if 'bubble_fill' in data:
+            bubble_val = data.get('bubble_fill')
+            if isinstance(bubble_val, QColor):
+                props.bubble_fill = bubble_val
+            elif bubble_val:
+                props.bubble_fill = QColor(bubble_val)
+        props.bubble_padding = data.get('bubble_padding', 0.0)
+        props.bubble_corner_radius = data.get('bubble_corner_radius', 12.0)
+
         # Alignment
         if 'alignment' in data:
             if isinstance(data['alignment'], int):
@@ -101,11 +113,14 @@ class TextItemProperties:
         props.line_spacing = item.line_spacing
         props.outline_color = item.outline_color
         props.outline_width = item.outline_width
+        props.bubble_fill = QColor(item.bubble_fill) if getattr(item, 'bubble_fill', None) else None
+        props.bubble_padding = getattr(item, 'bubble_padding', 0.0)
+        props.bubble_corner_radius = getattr(item, 'bubble_corner_radius', 12.0)
         props.bold = item.bold
         props.italic = item.italic
         props.underline = item.underline
         props.direction = item.direction
-        
+
         # Position and transformation
         props.position = (item.pos().x(), item.pos().y())
         props.rotation = item.rotation()
@@ -115,12 +130,13 @@ class TextItemProperties:
             props.transform_origin = (origin.x(), origin.y())
         
         # Layout properties
-        props.width = item.boundingRect().width()
+        width = item.textWidth()
+        props.width = width if width > 0 else item.boundingRect().width()
         props.vertical = getattr(item, 'vertical', False)
-        
+
         # Advanced properties
         props.selection_outlines = getattr(item, 'selection_outlines', []).copy()
-        
+
         return props
     
     def to_dict(self) -> dict:
@@ -138,6 +154,9 @@ class TextItemProperties:
             'italic': self.italic,
             'underline': self.underline,
             'direction': self.direction,
+            'bubble_fill': self.bubble_fill,
+            'bubble_padding': self.bubble_padding,
+            'bubble_corner_radius': self.bubble_corner_radius,
             'position': self.position,
             'rotation': self.rotation,
             'scale': self.scale,

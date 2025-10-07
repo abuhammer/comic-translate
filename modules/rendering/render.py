@@ -351,10 +351,22 @@ def manual_wrap(
         if decision:
             blk.font_color = decision.text_hex
             blk.outline_color = decision.outline_hex
+            if decision.bubble_fill_rgba:
+                blk.bubble_fill_rgba = decision.bubble_fill_rgba
+                shorter = max(1.0, min(width, height))
+                blk.bubble_padding = max(6.0, shorter * 0.08)
+                blk.bubble_corner_radius = max(10.0, shorter * 0.18)
+            else:
+                blk.bubble_fill_rgba = None
+                blk.bubble_padding = 0.0
+                blk.bubble_corner_radius = 0.0
         else:
             blk.font_color = blk.font_color or default_text_color
             if not getattr(blk, 'outline_color', ''):
                 blk.outline_color = default_outline_color if render_settings.outline else ''
+            blk.bubble_fill_rgba = None
+            blk.bubble_padding = 0.0
+            blk.bubble_corner_radius = 0.0
 
         translation, font_size = pyside_word_wrap(translation, font_family, width, height,
                                                  line_spacing, outline_width, bold, italic, underline,

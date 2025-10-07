@@ -4,6 +4,7 @@ from PySide6.QtGui import QFont, QCursor, QColor, \
      QTextCharFormat, QTextBlockFormat, QTextCursor, QPainter
 from PySide6.QtCore import Qt, QRectF, Signal, QPointF
 import math, copy
+from typing import Optional
 from dataclasses import dataclass
 from enum import Enum
 
@@ -42,19 +43,22 @@ class TextBlockItem(QGraphicsTextItem):
     text_highlighted = Signal(dict)
     change_undo = Signal(TextBlockState, TextBlockState)
     
-    def __init__(self, 
-             text = "", 
-             font_family = "", 
-             font_size = 20, 
-             render_color = QColor(0, 0, 0), 
-             alignment = Qt.AlignmentFlag.AlignCenter, 
-             line_spacing = 1.2, 
-             outline_color = QColor(255, 255, 255), 
+    def __init__(self,
+             text = "",
+             font_family = "",
+             font_size = 20,
+             render_color = QColor(0, 0, 0),
+             alignment = Qt.AlignmentFlag.AlignCenter,
+             line_spacing = 1.2,
+             outline_color = QColor(255, 255, 255),
              outline_width = 1,
-             bold=False, 
-             italic=False, 
+             bold=False,
+             italic=False,
              underline=False,
-             direction=Qt.LayoutDirection.LeftToRight):
+             direction=Qt.LayoutDirection.LeftToRight,
+             bubble_fill: Optional[QColor] = None,
+             bubble_padding: float = 0.0,
+             bubble_corner_radius: float = 12.0):
 
         super().__init__(text)
         self.text_color = render_color
@@ -87,6 +91,11 @@ class TextBlockItem(QGraphicsTextItem):
         self.old_state = None
 
         self.selection_outlines = []
+        self.bubble_fill = bubble_fill
+        self.bubble_padding = float(bubble_padding or 0.0)
+        self.bubble_corner_radius = float(bubble_corner_radius or 0.0)
+        self._bubble_shadow = None
+        self._update_bubble_shadow()
 
         self.setAcceptHoverEvents(True)
         self.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
@@ -101,16 +110,47 @@ class TextBlockItem(QGraphicsTextItem):
         # Set the initial text direction
         self._apply_text_direction()
 
+    def _update_bubble_shadow(self):
+        if self.bubble_fill and self.bubble_fill.alpha() > 0:
+            alpha = max(18, min(140, int(self.bubble_fill.alpha() * 0.45)))
+            self._bubble_shadow = QColor(0, 0, 0, alpha)
+        else:
+            self._bubble_shadow = None
+
     def _apply_text_direction(self):
         text_option = self.document().defaultTextOption()
         text_option.setTextDirection(self.direction)
         self.document().setDefaultTextOption(text_option)
+
+    def boundingRect(self) -> QRectF:
+        rect = QGraphicsTextItem.boundingRect(self)
+        if self.bubble_fill and self.bubble_fill.alpha() > 0 and self.bubble_padding > 0:
+            pad = self.bubble_padding
+            rect = rect.adjusted(-pad, -pad, pad, pad)
+        return rect
 
     def set_direction(self, direction):
         if self.direction != direction:
             self.direction = direction
             self._apply_text_direction()
             self.update()
+
+    def set_bubble_style(self, color: Optional[QColor], padding: float | None = None, corner_radius: float | None = None):
+        new_padding = float(padding if padding is not None else self.bubble_padding)
+        new_corner = float(corner_radius if corner_radius is not None else self.bubble_corner_radius)
+        geometry_change = (
+            (padding is not None and not math.isclose(new_padding, self.bubble_padding, rel_tol=1e-3, abs_tol=0.25))
+            or (corner_radius is not None and not math.isclose(new_corner, self.bubble_corner_radius, rel_tol=1e-3, abs_tol=0.25))
+        )
+
+        if geometry_change:
+            self.prepareGeometryChange()
+
+        self.bubble_fill = color
+        self.bubble_padding = max(0.0, new_padding)
+        self.bubble_corner_radius = max(0.0, new_corner)
+        self._update_bubble_shadow()
+        self.update()
 
     def set_text(self, text, width):
         if self.is_html(text):
@@ -321,12 +361,30 @@ class TextBlockItem(QGraphicsTextItem):
         
         self.update()
 
-    def paint(   
-        self, 
-        painter: QPainter, 
-        option: QStyleOptionGraphicsItem, 
+    def paint(
+        self,
+        painter: QPainter,
+        option: QStyleOptionGraphicsItem,
         widget: QWidget = None
     ):
+
+        if self.bubble_fill and self.bubble_fill.alpha() > 0:
+            base_rect = QGraphicsTextItem.boundingRect(self)
+            pad = self.bubble_padding if self.bubble_padding > 0 else 0.0
+            bubble_rect = base_rect.adjusted(-pad, -pad, pad, pad)
+
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setPen(Qt.PenStyle.NoPen)
+
+            if self._bubble_shadow:
+                shadow_rect = bubble_rect.translated(0.0, max(1.0, pad * 0.08 + 1.0))
+                painter.setBrush(self._bubble_shadow)
+                painter.drawRoundedRect(shadow_rect, self.bubble_corner_radius, self.bubble_corner_radius)
+
+            painter.setBrush(self.bubble_fill)
+            painter.drawRoundedRect(bubble_rect, self.bubble_corner_radius, self.bubble_corner_radius)
+            painter.restore()
 
         # Then handle any selection outlines
         if self.selection_outlines:

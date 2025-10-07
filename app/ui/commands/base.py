@@ -217,9 +217,12 @@ class RectCommandBase:
                     is_close(item.rotation(), properties.rotation) and
                     is_close(item.scale(), properties.scale) and
                     is_close(item.transformOriginPoint().x(), properties.transform_origin[0]) and
-                    is_close(item.transformOriginPoint().y(), properties.transform_origin[1]) and
-                    is_close(item.boundingRect().width(), properties.width)):
-                    return item
+                    is_close(item.transformOriginPoint().y(), properties.transform_origin[1])):
+                    item_width = item.textWidth()
+                    if item_width <= 0:
+                        item_width = item.boundingRect().width()
+                    if is_close(item_width, properties.width):
+                        return item
         return None
 
 

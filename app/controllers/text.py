@@ -166,6 +166,14 @@ class TextController:
         underline = render_settings.underline
         direction = render_settings.direction
 
+        bubble_color = None
+        bubble_padding = float(getattr(blk, "bubble_padding", 0.0) or 0.0)
+        bubble_corner = float(getattr(blk, "bubble_corner_radius", 0.0) or 0.0)
+        bubble_rgba = getattr(blk, "bubble_fill_rgba", None)
+        if bubble_rgba:
+            r, g, b, a = bubble_rgba
+            bubble_color = QColor(int(r), int(g), int(b), int(a))
+
         properties = TextItemProperties(
             text=text,
             font_family=font_family,
@@ -181,6 +189,9 @@ class TextController:
             direction=direction,
             position=(blk.xyxy[0], blk.xyxy[1]),
             rotation=blk.angle,
+            bubble_fill=bubble_color,
+            bubble_padding=bubble_padding,
+            bubble_corner_radius=bubble_corner,
         )
         
         text_item = self.main.image_viewer.add_text_item(properties)

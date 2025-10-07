@@ -21,6 +21,8 @@ class AdaptiveColorDecision:
     probability_light: float
     contrast_ratio: float
     background_luminance: float
+    bubble_fill_rgba: Optional[Tuple[int, int, int, int]] = None
+    bubble_fill_hex: Optional[str] = None
 
 
 class TextColorClassifier:
@@ -33,8 +35,29 @@ class TextColorClassifier:
     learned model.
     """
 
-    def __init__(self, min_contrast: float = 4.5):
+    def __init__(
+        self,
+        min_contrast: float = 4.5,
+        plain_variance_threshold: float = 8e-4,
+        plain_light_threshold: float = 0.88,
+        plain_dark_threshold: float = 0.12,
+        plain_color_std_threshold: float = 0.02,
+        plain_fraction_threshold: float = 0.82,
+        bubble_rgb: Tuple[float, float, float] = (35, 100, 160),
+        bubble_min_alpha: int = 120,
+        bubble_max_alpha: int = 235,
+        bubble_variance_cap: float = 0.04,
+    ):
         self.min_contrast = float(min_contrast)
+        self.plain_variance_threshold = float(plain_variance_threshold)
+        self.plain_light_threshold = float(plain_light_threshold)
+        self.plain_dark_threshold = float(plain_dark_threshold)
+        self.plain_color_std_threshold = float(max(0.0, plain_color_std_threshold))
+        self.plain_fraction_threshold = float(max(0.5, min(0.98, plain_fraction_threshold)))
+        self.bubble_base_rgb = _normalise_color(bubble_rgb)
+        self.bubble_min_alpha = int(max(0, min(255, round(bubble_min_alpha))))
+        self.bubble_max_alpha = int(max(self.bubble_min_alpha, min(255, round(bubble_max_alpha))))
+        self.bubble_variance_cap = max(1e-6, float(bubble_variance_cap))
 
     def decide(self, patch: np.ndarray) -> Optional[AdaptiveColorDecision]:
         """Analyse a patch and return the most legible text/outline colours."""
@@ -48,47 +71,81 @@ class TextColorClassifier:
 
         background_lum = stats.get("background_luminance", stats["median_luminance"])
         background_rgb = stats.get("background_rgb")
+        variance = stats.get("luminance_variance")
+        colour_std = stats.get("background_rgb_std")
+        light_fraction = stats.get("plain_light_fraction")
+        dark_fraction = stats.get("plain_dark_fraction")
+
+        if background_rgb is not None:
+            background_rgb = np.clip(np.asarray(background_rgb, dtype=np.float32), 0.0, 1.0)
 
         if background_rgb is None:
             return None
 
-        prefer_light = background_lum <= 0.5
+        if isinstance(colour_std, np.ndarray):
+            colour_std = float(np.mean(colour_std))
+        elif colour_std is not None:
+            colour_std = float(colour_std)
+
+        plain_category = self._plain_category(
+            background_lum,
+            variance,
+            colour_std,
+            light_fraction,
+            dark_fraction,
+        )
+        if plain_category:
+            return self._plain_background_decision(background_lum, plain_category)
+
+        bubble_rgb, bubble_alpha = self._bubble_style(background_rgb, variance)
+        if bubble_rgb is not None and bubble_alpha > 0.0:
+            effective_rgb = _blend_over_rgb(background_rgb, bubble_rgb, bubble_alpha)
+            bubble_rgba = _as_rgba8(bubble_rgb, bubble_alpha)
+            bubble_hex = _rgba_to_hex(bubble_rgba)
+        else:
+            effective_rgb = background_rgb
+            bubble_rgba = None
+            bubble_hex = None
+
+        effective_lum = _relative_luminance(effective_rgb)
+
+        prefer_light = effective_lum <= 0.5
         target_rgb = np.ones(3, dtype=np.float32) if prefer_light else np.zeros(3, dtype=np.float32)
 
         text_rgb, mix = _solve_mix_for_contrast(
-            base_rgb=background_rgb,
-            reference_lum=background_lum,
+            base_rgb=effective_rgb,
+            reference_lum=effective_lum,
             target_rgb=target_rgb,
             min_contrast=self.min_contrast,
         )
 
-        mix_floor = 0.6 if background_lum <= 0.5 else 0.45
+        mix_floor = 0.6 if effective_lum <= 0.5 else 0.45
         if mix < mix_floor:
-            text_rgb = background_rgb * (1.0 - mix_floor) + target_rgb * mix_floor
+            text_rgb = effective_rgb * (1.0 - mix_floor) + target_rgb * mix_floor
             mix = mix_floor
 
         text_lum = _relative_luminance(text_rgb)
-        contrast = contrast_ratio(background_lum, text_lum)
+        contrast = contrast_ratio(effective_lum, text_lum)
 
         # If contrast is still under the target, fall back to the pure extreme.
         if contrast < self.min_contrast:
             text_rgb = target_rgb
             text_lum = _relative_luminance(text_rgb)
-            contrast = contrast_ratio(background_lum, text_lum)
+            contrast = contrast_ratio(effective_lum, text_lum)
 
-        probability_light = 0.75 if text_lum >= background_lum else 0.25
+        probability_light = 0.75 if text_lum >= effective_lum else 0.25
 
-        outline_target = np.zeros(3, dtype=np.float32) if text_lum >= background_lum else np.ones(3, dtype=np.float32)
+        outline_target = np.zeros(3, dtype=np.float32) if text_lum >= effective_lum else np.ones(3, dtype=np.float32)
         outline_rgb, outline_mix = _solve_mix_for_contrast(
-            base_rgb=background_rgb,
+            base_rgb=effective_rgb,
             reference_lum=text_lum,
             target_rgb=outline_target,
             min_contrast=max(3.0, self.min_contrast - 1.0),
         )
 
-        outline_floor = 0.35 if text_lum >= background_lum else 0.3
+        outline_floor = 0.35 if text_lum >= effective_lum else 0.3
         if outline_mix < outline_floor:
-            outline_rgb = background_rgb * (1.0 - outline_floor) + outline_target * outline_floor
+            outline_rgb = effective_rgb * (1.0 - outline_floor) + outline_target * outline_floor
 
         outline_lum = _relative_luminance(outline_rgb)
         outline_contrast = contrast_ratio(text_lum, outline_lum)
@@ -101,15 +158,158 @@ class TextColorClassifier:
         outline_hex = _rgb_to_hex(outline_rgb)
 
         if outline_hex.lower() == text_hex.lower():
-            outline_hex = "#000000" if text_lum >= background_lum else "#FFFFFF"
+            outline_hex = "#000000" if text_lum >= effective_lum else "#FFFFFF"
 
         return AdaptiveColorDecision(
             text_hex=text_hex,
             outline_hex=outline_hex,
             probability_light=probability_light,
             contrast_ratio=contrast,
-            background_luminance=background_lum,
+            background_luminance=effective_lum,
+            bubble_fill_rgba=bubble_rgba,
+            bubble_fill_hex=bubble_hex,
         )
+
+
+    def _plain_background_decision(
+        self,
+        background_lum: float,
+        category: Optional[str] = None,
+    ) -> AdaptiveColorDecision:
+        """Return a pure black/white pairing for nearly uniform backgrounds."""
+
+        if category == "light":
+            text_rgb = np.zeros(3, dtype=np.float32)
+        elif category == "dark":
+            text_rgb = np.ones(3, dtype=np.float32)
+        elif background_lum >= self.plain_light_threshold:
+            text_rgb = np.zeros(3, dtype=np.float32)
+        elif background_lum <= self.plain_dark_threshold:
+            text_rgb = np.ones(3, dtype=np.float32)
+        else:
+            text_rgb = np.zeros(3, dtype=np.float32) if background_lum >= 0.5 else np.ones(3, dtype=np.float32)
+
+        candidates = [np.zeros(3, dtype=np.float32), np.ones(3, dtype=np.float32)]
+        best_rgb = text_rgb
+        best_contrast = contrast_ratio(background_lum, _relative_luminance(text_rgb))
+
+        for candidate in candidates:
+            cand_contrast = contrast_ratio(background_lum, _relative_luminance(candidate))
+            if cand_contrast > best_contrast + 1e-6:
+                best_rgb = candidate
+                best_contrast = cand_contrast
+
+        text_rgb = best_rgb
+        text_lum = _relative_luminance(text_rgb)
+        probability_light = 0.75 if text_lum >= background_lum else 0.25
+
+        outline_rgb = np.zeros(3, dtype=np.float32) if text_lum >= background_lum else np.ones(3, dtype=np.float32)
+
+        text_hex = _rgb_to_hex(text_rgb)
+        outline_hex = _rgb_to_hex(outline_rgb)
+
+        return AdaptiveColorDecision(
+            text_hex=text_hex,
+            outline_hex=outline_hex,
+            probability_light=probability_light,
+            contrast_ratio=best_contrast,
+            background_luminance=background_lum,
+            bubble_fill_rgba=None,
+            bubble_fill_hex=None,
+        )
+
+    def _plain_category(
+        self,
+        background_lum: float,
+        variance: Optional[float],
+        colour_std: Optional[float],
+        light_fraction: Optional[float],
+        dark_fraction: Optional[float],
+    ) -> Optional[str]:
+        variance = None if variance is None else float(variance)
+        colour_std = None if colour_std is None else float(colour_std)
+        light_fraction = None if light_fraction is None else float(light_fraction)
+        dark_fraction = None if dark_fraction is None else float(dark_fraction)
+
+        def _meets_fraction(fraction: Optional[float]) -> bool:
+            return fraction is not None and fraction >= self.plain_fraction_threshold
+
+        def _plainish(val: Optional[float], threshold: float, multiplier: float = 1.0) -> bool:
+            if val is None:
+                return False
+            return val <= threshold * multiplier
+
+        if _meets_fraction(light_fraction):
+            if background_lum >= self.plain_light_threshold - 0.05:
+                return "light"
+            if _plainish(variance, self.plain_variance_threshold, 6.0) or _plainish(
+                colour_std, self.plain_color_std_threshold, 4.0
+            ):
+                return "light"
+
+        if _meets_fraction(dark_fraction):
+            if background_lum <= self.plain_dark_threshold + 0.05:
+                return "dark"
+            if _plainish(variance, self.plain_variance_threshold, 6.0) or _plainish(
+                colour_std, self.plain_color_std_threshold, 4.0
+            ):
+                return "dark"
+
+        if variance is not None and variance <= self.plain_variance_threshold:
+            return "light" if background_lum >= 0.5 else "dark"
+
+        if colour_std is not None and colour_std <= self.plain_color_std_threshold:
+            return "light" if background_lum >= 0.5 else "dark"
+
+        if background_lum >= self.plain_light_threshold or background_lum <= self.plain_dark_threshold:
+            if _plainish(variance, self.plain_variance_threshold, 4.0) or _plainish(
+                colour_std, self.plain_color_std_threshold, 2.5
+            ):
+                return "light" if background_lum >= 0.5 else "dark"
+
+        return None
+
+    def _bubble_style(
+        self,
+        background_rgb: np.ndarray,
+        variance: Optional[float],
+    ) -> Tuple[Optional[np.ndarray], float]:
+        if background_rgb is None:
+            return None, 0.0
+
+        if variance is None:
+            variance = self.bubble_variance_cap
+        else:
+            variance = float(variance)
+
+        variance = max(0.0, min(self.bubble_variance_cap, variance))
+        alpha = self.bubble_min_alpha + (self.bubble_max_alpha - self.bubble_min_alpha) * (
+            variance / self.bubble_variance_cap
+        )
+        alpha = max(0.0, min(255.0, alpha))
+        alpha_norm = float(alpha / 255.0)
+
+        if alpha_norm <= 0.0:
+            return None, 0.0
+
+        background_lum = _relative_luminance(background_rgb)
+        base = self.bubble_base_rgb.copy()
+
+        if background_lum >= 0.65:
+            target_lum = 0.12
+        elif background_lum <= 0.3:
+            target_lum = 0.12
+        else:
+            target_lum = 0.18
+
+        base_lum = max(1e-4, _relative_luminance(base))
+        scale = target_lum / base_lum
+        bubble_rgb = np.clip(base * scale, 0.0, 1.0)
+
+        hue_push = background_rgb - float(np.mean(background_rgb))
+        bubble_rgb = np.clip(bubble_rgb - 0.2 * hue_push, 0.0, 1.0)
+
+        return bubble_rgb.astype(np.float32), alpha_norm
 
 
 def contrast_ratio(background_lum: float, text_lum: float) -> float:
@@ -168,6 +368,37 @@ def _rgb_to_hex(rgb: np.ndarray) -> str:
     return "#" + "".join(f"{val:02X}" for val in values)
 
 
+def _rgba_to_hex(rgba: Optional[Tuple[int, int, int, int]]) -> Optional[str]:
+    if rgba is None:
+        return None
+    r, g, b, a = rgba
+    return f"#{r:02X}{g:02X}{b:02X}{a:02X}"
+
+
+def _normalise_color(color: Tuple[float, float, float]) -> np.ndarray:
+    arr = np.asarray(color, dtype=np.float32)
+    if arr.size < 3:
+        raise ValueError("Colour tuples must have at least three components")
+    if arr.max() > 1.0:
+        arr = arr / 255.0
+    arr = np.clip(arr[:3], 0.0, 1.0)
+    return arr.astype(np.float32)
+
+
+def _blend_over_rgb(bg_rgb: np.ndarray, fg_rgb: np.ndarray, fg_alpha: float) -> np.ndarray:
+    bg = np.clip(np.asarray(bg_rgb, dtype=np.float32), 0.0, 1.0)
+    fg = np.clip(np.asarray(fg_rgb, dtype=np.float32), 0.0, 1.0)
+    alpha = float(max(0.0, min(1.0, fg_alpha)))
+    return fg * alpha + bg * (1.0 - alpha)
+
+
+def _as_rgba8(rgb: np.ndarray, alpha: float) -> Tuple[int, int, int, int]:
+    rgb = np.clip(np.asarray(rgb, dtype=np.float32), 0.0, 1.0)
+    vals = np.round(rgb * 255.0).astype(np.int32)
+    alpha_i = int(round(max(0.0, min(1.0, float(alpha))) * 255.0))
+    return int(vals[0]), int(vals[1]), int(vals[2]), alpha_i
+
+
 def extract_patch_statistics(patch: np.ndarray) -> dict:
     """Compute luminance statistics that drive the contrast heuristic."""
 
@@ -199,26 +430,48 @@ def extract_patch_statistics(patch: np.ndarray) -> dict:
     reference_values = trimmed if trimmed.size else smooth_values
     mean_l = float(np.mean(reference_values)) if reference_values.size else float(np.mean(smooth_values))
     median_l = float(np.median(reference_values)) if reference_values.size else float(np.median(smooth_values))
+    variance_source = reference_values if reference_values.size else smooth_values
+    luminance_variance = float(np.var(variance_source)) if variance_source.size else 0.0
     dominant, secondary = _dominant_components(reference_values if reference_values.size else smooth_values)
 
     rgb_flat = patch_float.reshape(-1, 3)
     if background_mask is not None and background_mask.size == luminance.size:
         mask_flat = background_mask.reshape(-1)
-        background_rgb = rgb_flat[mask_flat]
+        background_pixels = rgb_flat[mask_flat]
     else:
-        background_rgb = rgb_flat
+        background_pixels = rgb_flat
 
-    if background_rgb.size == 0:
-        background_rgb = rgb_flat
+    if background_pixels.size == 0:
+        background_pixels = rgb_flat
 
-    background_rgb = np.mean(background_rgb, axis=0) if background_rgb.size else np.array([0.5, 0.5, 0.5], dtype=np.float32)
+    if background_pixels.size == 0:
+        background_pixels = np.array([[0.5, 0.5, 0.5]], dtype=np.float32)
+
+    background_luminance_vals = (
+        0.2126 * background_pixels[:, 0]
+        + 0.7152 * background_pixels[:, 1]
+        + 0.0722 * background_pixels[:, 2]
+    )
+    if background_luminance_vals.size:
+        light_fraction = float(np.mean(background_luminance_vals >= 0.9))
+        dark_fraction = float(np.mean(background_luminance_vals <= 0.1))
+    else:
+        light_fraction = 0.0
+        dark_fraction = 0.0
+
+    background_rgb = np.mean(background_pixels, axis=0)
+    background_std = np.std(background_pixels, axis=0)
 
     return {
         "mean_luminance": mean_l,
         "median_luminance": median_l,
         "background_luminance": float(dominant),
         "secondary_luminance": float(secondary if not np.isnan(secondary) else dominant),
+        "luminance_variance": luminance_variance,
         "background_rgb": background_rgb.astype(np.float32),
+        "background_rgb_std": background_std.astype(np.float32),
+        "plain_light_fraction": light_fraction,
+        "plain_dark_fraction": dark_fraction,
     }
 
 

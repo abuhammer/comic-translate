@@ -827,6 +827,15 @@ class WebtoonBatchProcessor:
                 blk_virtual.outline_color = decision.outline_hex
                 text_color = QColor(decision.text_hex)
                 outline_color = QColor(decision.outline_hex)
+                if getattr(decision, 'bubble_fill_rgba', None):
+                    blk_virtual.bubble_fill_rgba = decision.bubble_fill_rgba
+                    shorter = max(1.0, min(width, height))
+                    blk_virtual.bubble_padding = max(6.0, shorter * 0.08)
+                    blk_virtual.bubble_corner_radius = max(10.0, shorter * 0.18)
+                else:
+                    blk_virtual.bubble_fill_rgba = None
+                    blk_virtual.bubble_padding = 0.0
+                    blk_virtual.bubble_corner_radius = 0.0
             else:
                 if not getattr(blk_virtual, 'font_color', ''):
                     blk_virtual.font_color = default_text_color.name()
@@ -838,6 +847,9 @@ class WebtoonBatchProcessor:
                     outline_color = QColor(blk_virtual.outline_color)
                 else:
                     outline_color = default_outline_color
+                blk_virtual.bubble_fill_rgba = None
+                blk_virtual.bubble_padding = 0.0
+                blk_virtual.bubble_corner_radius = 0.0
 
             outline_enabled = outline or bool(decision) or bool(getattr(blk_virtual, 'outline_color', ''))
 
@@ -865,6 +877,14 @@ class WebtoonBatchProcessor:
             # Language-specific formatting for State Storage
 
             # Use TextItemProperties for consistent text item creation
+            bubble_qcolor = None
+            bubble_rgba = getattr(render_blk, 'bubble_fill_rgba', None)
+            if bubble_rgba:
+                r, g, b, a = bubble_rgba
+                bubble_qcolor = QColor(int(r), int(g), int(b), int(a))
+            bubble_padding = float(getattr(render_blk, 'bubble_padding', 0.0) or 0.0)
+            bubble_corner = float(getattr(render_blk, 'bubble_corner_radius', 0.0) or 0.0)
+
             text_props = TextItemProperties(
                 text=translation,
                 font_family=font,
@@ -883,6 +903,9 @@ class WebtoonBatchProcessor:
                 transform_origin=blk_virtual.tr_origin_point if blk_virtual.tr_origin_point else (0, 0),
                 width=width,
                 direction=direction,
+                bubble_fill=bubble_qcolor,
+                bubble_padding=bubble_padding,
+                bubble_corner_radius=bubble_corner,
                 selection_outlines=[
                     OutlineInfo(
                         0,

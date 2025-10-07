@@ -387,20 +387,23 @@ class ImageViewer(QGraphicsView):
         # Create the TextBlockItem with the most up-to-date construction logic
         # Based on the load_state function which has the most complete setup
         item = TextBlockItem(
-            text=properties.text, 
+            text=properties.text,
             font_family=properties.font_family,
-            font_size=properties.font_size, 
+            font_size=properties.font_size,
             render_color=properties.text_color,
-            alignment=properties.alignment, 
+            alignment=properties.alignment,
             line_spacing=properties.line_spacing,
-            outline_color=properties.outline_color, 
+            outline_color=properties.outline_color,
             outline_width=properties.outline_width,
-            bold=properties.bold, 
-            italic=properties.italic, 
+            bold=properties.bold,
+            italic=properties.italic,
             underline=properties.underline,
             direction=properties.direction,
+            bubble_fill=properties.bubble_fill,
+            bubble_padding=properties.bubble_padding,
+            bubble_corner_radius=properties.bubble_corner_radius,
         )
-        
+
         # Apply width if specified
         if properties.width is not None:
             item.set_text(properties.text, properties.width)

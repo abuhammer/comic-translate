@@ -370,6 +370,15 @@ class BatchProcessor:
                     blk.outline_color = decision.outline_hex
                     text_color = QColor(decision.text_hex)
                     outline_color = QColor(decision.outline_hex)
+                    if getattr(decision, 'bubble_fill_rgba', None):
+                        blk.bubble_fill_rgba = decision.bubble_fill_rgba
+                        shorter = max(1.0, min(width, height))
+                        blk.bubble_padding = max(6.0, shorter * 0.08)
+                        blk.bubble_corner_radius = max(10.0, shorter * 0.18)
+                    else:
+                        blk.bubble_fill_rgba = None
+                        blk.bubble_padding = 0.0
+                        blk.bubble_corner_radius = 0.0
                 else:
                     if not getattr(blk, 'font_color', ''):
                         blk.font_color = default_text_color.name()
@@ -381,6 +390,9 @@ class BatchProcessor:
                         outline_color = QColor(blk.outline_color)
                     else:
                         outline_color = default_outline_color
+                    blk.bubble_fill_rgba = None
+                    blk.bubble_padding = 0.0
+                    blk.bubble_corner_radius = 0.0
 
                 outline_enabled = render_settings.outline or bool(decision) or bool(getattr(blk, 'outline_color', ''))
 
@@ -393,6 +405,14 @@ class BatchProcessor:
                     translation = translation.replace(' ', '')
 
                 # Use TextItemProperties for consistent text item creation
+                bubble_qcolor = None
+                bubble_rgba = getattr(blk, 'bubble_fill_rgba', None)
+                if bubble_rgba:
+                    r, g, b, a = bubble_rgba
+                    bubble_qcolor = QColor(int(r), int(g), int(b), int(a))
+                bubble_padding = float(getattr(blk, 'bubble_padding', 0.0) or 0.0)
+                bubble_corner = float(getattr(blk, 'bubble_corner_radius', 0.0) or 0.0)
+
                 text_props = TextItemProperties(
                     text=translation,
                     font_family=font,
@@ -411,6 +431,9 @@ class BatchProcessor:
                     transform_origin=blk.tr_origin_point,
                     width=width,
                     direction=direction,
+                    bubble_fill=bubble_qcolor,
+                    bubble_padding=bubble_padding,
+                    bubble_corner_radius=bubble_corner,
                     selection_outlines=[
                         OutlineInfo(0, len(translation),
                         outline_color,

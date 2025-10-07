@@ -3,6 +3,7 @@ import numpy as np
 from modules.rendering.adaptive_color import (
     TextColorClassifier,
     sample_block_background,
+    contrast_ratio,
 )
 from modules.utils.textblock import TextBlock
 
@@ -29,11 +30,10 @@ def test_classifier_prefers_light_text_on_dark_background():
     decision = classifier.decide(dark_patch)
 
     assert decision is not None
-    text_rgb = _hex_to_rgb(decision.text_hex)
-    outline_rgb = _hex_to_rgb(decision.outline_hex)
-    assert _relative_luminance(text_rgb) > 0.55
-    assert _relative_luminance(outline_rgb) < 0.15
+    assert decision.text_hex.lower() == "#ffffff"
+    assert decision.outline_hex.lower() == "#000000"
     assert decision.contrast_ratio >= 4.5
+    assert decision.bubble_fill_rgba is None
 
 
 def test_classifier_prefers_dark_text_on_light_background():
@@ -42,11 +42,61 @@ def test_classifier_prefers_dark_text_on_light_background():
     decision = classifier.decide(light_patch)
 
     assert decision is not None
-    text_rgb = _hex_to_rgb(decision.text_hex)
-    outline_rgb = _hex_to_rgb(decision.outline_hex)
-    assert _relative_luminance(text_rgb) < 0.45
-    assert _relative_luminance(outline_rgb) > 0.75
+    assert decision.text_hex.lower() == "#000000"
+    assert decision.outline_hex.lower() == "#ffffff"
     assert decision.contrast_ratio >= 3.5
+    assert decision.bubble_fill_rgba is None
+
+
+def test_classifier_prefers_black_on_plain_mid_tone():
+    classifier = TextColorClassifier()
+    mid_patch = np.full((20, 20, 3), 180, dtype=np.uint8)
+    decision = classifier.decide(mid_patch)
+
+    assert decision is not None
+    assert decision.text_hex.lower() == "#000000"
+    assert decision.outline_hex.lower() == "#ffffff"
+    assert decision.contrast_ratio >= 4.5
+    assert decision.bubble_fill_rgba is None
+
+
+def test_classifier_handles_nearly_plain_white_patch_without_bubble():
+    classifier = TextColorClassifier()
+    patch = np.full((40, 60, 3), 245, dtype=np.uint8)
+    patch[12:18, 20:26] = 220
+    patch[25:30, 40:45] = 250
+
+    decision = classifier.decide(patch)
+
+    assert decision is not None
+    assert decision.text_hex.lower() == "#000000"
+    assert decision.bubble_fill_rgba is None
+
+
+def test_classifier_forces_black_text_on_white_bubble_with_dark_letters():
+    classifier = TextColorClassifier()
+    patch = np.full((80, 80, 3), 248, dtype=np.uint8)
+    patch[20:60, 30:50] = 40
+    patch[30:50, 40:45] = 60
+
+    decision = classifier.decide(patch)
+
+    assert decision is not None
+    assert decision.text_hex.lower() == "#000000"
+    assert decision.bubble_fill_rgba is None
+
+
+def test_classifier_forces_white_text_on_black_bubble_with_light_letters():
+    classifier = TextColorClassifier()
+    patch = np.zeros((80, 80, 3), dtype=np.uint8)
+    patch[18:62, 28:52] = 210
+    patch[24:56, 34:46] = 235
+
+    decision = classifier.decide(patch)
+
+    assert decision is not None
+    assert decision.text_hex.lower() == "#ffffff"
+    assert decision.bubble_fill_rgba is None
 
 
 def test_classifier_ignores_foreground_text_when_background_is_dark():
@@ -62,6 +112,7 @@ def test_classifier_ignores_foreground_text_when_background_is_dark():
     outline_rgb = _hex_to_rgb(decision.outline_hex)
     assert _relative_luminance(text_rgb) > _relative_luminance(outline_rgb)
     assert decision.contrast_ratio >= 3.5
+    assert decision.bubble_fill_rgba is not None
 
 
 def test_classifier_handles_light_background_with_dark_foreground_noise():
@@ -74,8 +125,26 @@ def test_classifier_handles_light_background_with_dark_foreground_noise():
     assert decision is not None
     text_rgb = _hex_to_rgb(decision.text_hex)
     outline_rgb = _hex_to_rgb(decision.outline_hex)
-    assert _relative_luminance(text_rgb) < _relative_luminance(outline_rgb)
+    assert contrast_ratio(_relative_luminance(text_rgb), _relative_luminance(outline_rgb)) >= 1.5
     assert decision.contrast_ratio >= 4.0
+    assert decision.bubble_fill_rgba is None
+
+
+def test_classifier_generates_translucent_bubble_on_busy_background():
+    classifier = TextColorClassifier()
+    # Create a high-variance patch with alternating tones
+    patch = np.zeros((60, 80, 3), dtype=np.uint8)
+    patch[:, :40] = [30, 70, 140]
+    patch[:, 40:] = [210, 200, 220]
+
+    decision = classifier.decide(patch)
+
+    assert decision is not None
+    assert decision.bubble_fill_rgba is not None
+    r, g, b, a = decision.bubble_fill_rgba
+    assert 120 <= a <= 235
+    assert decision.bubble_fill_hex is not None
+    assert decision.bubble_fill_hex.startswith("#")
 
 
 def test_sample_block_background_fallback_when_shrink_collapses():
