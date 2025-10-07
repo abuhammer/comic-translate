@@ -101,6 +101,7 @@ class ComicTranslate(ComicTranslateUI):
             'bubble_flat_var': 8e-4,
             'bubble_plain_alpha': 230,
             'text_target_contrast': 4.5,
+            'bubble_text_alpha': 255,
             'bubble_gradient_enabled': False,
             'bubble_gradient_start': (35, 100, 160),
             'bubble_gradient_end': (200, 220, 255),
@@ -236,6 +237,14 @@ class ComicTranslate(ComicTranslateUI):
             self.bubble_plain_alpha_spin.valueChanged.connect(self.text_ctrl.on_bubble_plain_alpha_change)
         if getattr(self, 'bubble_plain_alpha_slider', None):
             self.bubble_plain_alpha_slider.valueChanged.connect(self.text_ctrl.on_bubble_plain_alpha_change)
+        if getattr(self, 'bubble_text_alpha_spin', None):
+            self.bubble_text_alpha_spin.valueChanged.connect(
+                partial(self.text_ctrl.on_bubble_text_alpha_change, source='spin')
+            )
+        if getattr(self, 'bubble_text_alpha_slider', None):
+            self.bubble_text_alpha_slider.valueChanged.connect(
+                partial(self.text_ctrl.on_bubble_text_alpha_change, source='slider')
+            )
         if getattr(self, 'bubble_gradient_checkbox', None):
             self.bubble_gradient_checkbox.stateChanged.connect(self.text_ctrl.on_bubble_gradient_toggled)
         if getattr(self, 'bubble_gradient_start_button', None):

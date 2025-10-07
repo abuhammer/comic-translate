@@ -55,6 +55,7 @@ class TextRenderingSettings:
     bubble_flat_var: float = 8e-4
     bubble_plain_alpha: int = 230
     text_target_contrast: float = 4.5
+    bubble_text_alpha: int = 255
     bubble_gradient_enabled: bool = False
     bubble_gradient_start: Tuple[int, int, int] = (35, 100, 160)
     bubble_gradient_end: Tuple[int, int, int] = (200, 220, 255)
@@ -361,6 +362,7 @@ def manual_wrap(
     bubble_flat_var = float(getattr(render_settings, "bubble_flat_var", 8e-4))
     bubble_plain_alpha = int(getattr(render_settings, "bubble_plain_alpha", 230))
     text_target_contrast = float(getattr(render_settings, "text_target_contrast", 4.5))
+    bubble_text_alpha = int(getattr(render_settings, "bubble_text_alpha", 255))
     bubble_gradient_enabled = bool(
         getattr(render_settings, "bubble_gradient_enabled", False)
     )
@@ -405,6 +407,7 @@ def manual_wrap(
                     plain_thresh_hi=bubble_plain_hi,
                     plain_thresh_lo=bubble_plain_lo,
                     flat_var=bubble_flat_var,
+                    text_alpha=bubble_text_alpha,
                     gradient_enabled=bubble_gradient_enabled,
                     gradient_start=bubble_gradient_start,
                     gradient_end=bubble_gradient_end,
@@ -420,6 +423,7 @@ def manual_wrap(
             text_rgb = bubble_style_obj.text_rgb
             outline_rgb = bubble_style_obj.outline_rgb
             blk.font_color = f"#{text_rgb[0]:02X}{text_rgb[1]:02X}{text_rgb[2]:02X}"
+            blk.font_alpha = int(bubble_style_obj.text_alpha)
             blk.outline_color = f"#{outline_rgb[0]:02X}{outline_rgb[1]:02X}{outline_rgb[2]:02X}"
             blk.outline_width = bubble_style_obj.outline_width
         else:
@@ -432,8 +436,10 @@ def manual_wrap(
             if decision:
                 blk.font_color = decision.text_hex
                 blk.outline_color = decision.outline_hex
+                blk.font_alpha = 255
             else:
                 blk.font_color = blk.font_color or default_text_color
+                blk.font_alpha = 255
                 if not getattr(blk, 'outline_color', ''):
                     blk.outline_color = default_outline_color if render_settings.outline else ''
 

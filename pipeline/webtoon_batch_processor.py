@@ -788,6 +788,7 @@ class WebtoonBatchProcessor:
         bubble_flat_var = float(getattr(render_settings, 'bubble_flat_var', 8e-4))
         bubble_plain_alpha = int(getattr(render_settings, 'bubble_plain_alpha', 230))
         text_target_contrast = float(getattr(render_settings, 'text_target_contrast', 4.5))
+        bubble_text_alpha = int(getattr(render_settings, 'bubble_text_alpha', 255))
         bubble_gradient_enabled = bool(
             getattr(render_settings, 'bubble_gradient_enabled', False)
         )
@@ -861,11 +862,12 @@ class WebtoonBatchProcessor:
                         max_alpha=bubble_max_alpha,
                         text_min_contrast=text_target_contrast,
                         bubble_mode=bubble_mode,
-                            plain_alpha=bubble_plain_alpha,
-                            plain_thresh_hi=bubble_plain_hi,
-                            plain_thresh_lo=bubble_plain_lo,
-                            flat_var=bubble_flat_var,
-                            gradient_enabled=bubble_gradient_enabled,
+                        plain_alpha=bubble_plain_alpha,
+                        plain_thresh_hi=bubble_plain_hi,
+                        plain_thresh_lo=bubble_plain_lo,
+                        flat_var=bubble_flat_var,
+                        text_alpha=bubble_text_alpha,
+                        gradient_enabled=bubble_gradient_enabled,
                             gradient_start=bubble_gradient_start,
                             gradient_end=bubble_gradient_end,
                             gradient_angle=bubble_gradient_angle,
@@ -887,9 +889,15 @@ class WebtoonBatchProcessor:
                 text_hex = f"#{text_rgb[0]:02X}{text_rgb[1]:02X}{text_rgb[2]:02X}"
                 outline_hex = f"#{outline_rgb[0]:02X}{outline_rgb[1]:02X}{outline_rgb[2]:02X}"
                 blk_virtual.font_color = text_hex
+                blk_virtual.font_alpha = int(bubble_style_obj.text_alpha)
                 blk_virtual.outline_color = outline_hex
                 blk_virtual.outline_width = bubble_style_obj.outline_width
-                text_color = QColor(*text_rgb)
+                text_color = QColor(
+                    int(text_rgb[0]),
+                    int(text_rgb[1]),
+                    int(text_rgb[2]),
+                    int(bubble_style_obj.text_alpha),
+                )
                 outline_color = QColor(*outline_rgb)
                 effective_outline_width = bubble_style_obj.outline_width
             else:
@@ -903,12 +911,16 @@ class WebtoonBatchProcessor:
                 if decision:
                     blk_virtual.font_color = decision.text_hex
                     blk_virtual.outline_color = decision.outline_hex
+                    blk_virtual.font_alpha = 255
                     text_color = QColor(decision.text_hex)
+                    text_color.setAlpha(255)
                     outline_color = QColor(decision.outline_hex)
                 else:
                     if not getattr(blk_virtual, 'font_color', ''):
                         blk_virtual.font_color = default_text_color.name()
+                    blk_virtual.font_alpha = int(getattr(blk_virtual, 'font_alpha', 255) or 255)
                     text_color = QColor(blk_virtual.font_color)
+                    text_color.setAlpha(int(blk_virtual.font_alpha))
                     if getattr(blk_virtual, 'outline_color', ''):
                         outline_color = QColor(blk_virtual.outline_color)
                     elif outline:
@@ -933,6 +945,7 @@ class WebtoonBatchProcessor:
 
             render_blk.translation = translation
             render_blk.font_color = blk_virtual.font_color
+            render_blk.font_alpha = getattr(blk_virtual, 'font_alpha', 255)
             render_blk.outline_color = blk_virtual.outline_color
             render_blk.outline_width = getattr(blk_virtual, 'outline_width', outline_width)
             render_blk.bubble_style = getattr(blk_virtual, 'bubble_style', None)

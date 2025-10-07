@@ -27,6 +27,7 @@ class TextBlock(object):
                  min_font_size: int = 0,
                  max_font_size: int = 0,
                  font_color: str = "",
+                 font_alpha: int = 255,
                  outline_color: str = "",
                  **kwargs) -> None:
         
@@ -55,6 +56,7 @@ class TextBlock(object):
         self.min_font_size = min_font_size
         self.max_font_size = max_font_size
         self.font_color = font_color
+        self.font_alpha = int(font_alpha)
         self.outline_color = outline_color
         self.outline_width = kwargs.get('outline_width', kwargs.get('outlineWidth', 1.0))
         self.bubble_style = kwargs.get('bubble_style')
@@ -107,6 +109,7 @@ class TextBlock(object):
         new_block.min_font_size = self.min_font_size
         new_block.max_font_size = self.max_font_size
         new_block.font_color = self.font_color
+        new_block.font_alpha = getattr(self, 'font_alpha', 255)
         new_block.outline_color = self.outline_color
         new_block.outline_width = getattr(self, 'outline_width', 1.0)
         new_block.bubble_style = copy.deepcopy(getattr(self, 'bubble_style', None))

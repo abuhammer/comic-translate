@@ -47,6 +47,8 @@ class TextController:
             getattr(self.main, 'bubble_max_alpha_slider', None),
             getattr(self.main, 'bubble_plain_alpha_spin', None),
             getattr(self.main, 'bubble_plain_alpha_slider', None),
+            getattr(self.main, 'bubble_text_alpha_spin', None),
+            getattr(self.main, 'bubble_text_alpha_slider', None),
             getattr(self.main, 'bubble_gradient_checkbox', None),
             getattr(self.main, 'bubble_gradient_start_button', None),
             getattr(self.main, 'bubble_gradient_end_button', None),
@@ -125,6 +127,7 @@ class TextController:
 
     def _plain_style_from_config(self, render_settings: TextRenderingSettings) -> dict:
         rgb = tuple(int(v) for v in render_settings.bubble_rgb[:3])
+        text_alpha = int(getattr(render_settings, 'bubble_text_alpha', 255))
         mode = (render_settings.bubble_mode or 'auto').lower()
         if mode == 'plain':
             alpha = int(render_settings.bubble_plain_alpha)
@@ -143,6 +146,7 @@ class TextController:
         style = {
             'fill_rgba': fill_rgba,
             'text_rgb': text_rgb,
+            'text_alpha': text_alpha,
             'outline_rgb': outline_rgb,
             'outline_width': 2.0,
             'shadow_rgba': (outline_rgb[0], outline_rgb[1], outline_rgb[2], shadow_alpha),
@@ -201,10 +205,13 @@ class TextController:
         item.set_bubble_style(style)
 
         text_rgb = style.get('text_rgb')
+        text_alpha = int(style.get('text_alpha', getattr(blk, 'font_alpha', 255)))
         if text_rgb:
             text_hex = '#{0:02X}{1:02X}{2:02X}'.format(*text_rgb[:3])
             blk.font_color = text_hex
-            item.set_color(QColor(text_hex))
+            blk.font_alpha = text_alpha
+            text_color = QColor(int(text_rgb[0]), int(text_rgb[1]), int(text_rgb[2]), text_alpha)
+            item.set_color(text_color)
 
         outline_rgb = style.get('outline_rgb')
         outline_width = float(style.get('outline_width', getattr(blk, 'outline_width', 1.0)))
@@ -550,6 +557,22 @@ class TextController:
             slider.blockSignals(False)
         self.refresh_bubble_styles(recompute=True)
 
+    def on_bubble_text_alpha_change(self, value: int, source: str = 'spin'):
+        cfg = getattr(self.main, 'bubble_style_config', {})
+        value = int(value)
+        cfg['bubble_text_alpha'] = value
+        spin = getattr(self.main, 'bubble_text_alpha_spin', None)
+        slider = getattr(self.main, 'bubble_text_alpha_slider', None)
+        if source != 'spin' and spin is not None and spin.value() != value:
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
+        if source != 'slider' and slider is not None and slider.value() != value:
+            slider.blockSignals(True)
+            slider.setValue(value)
+            slider.blockSignals(False)
+        self.refresh_bubble_styles(recompute=True)
+
     def on_bubble_gradient_toggled(self, state: int):
         cfg = getattr(self.main, 'bubble_style_config', {})
         enabled = bool(state)
@@ -637,6 +660,7 @@ class TextController:
                         plain_thresh_hi=render_settings.bubble_plain_hi,
                         plain_thresh_lo=render_settings.bubble_plain_lo,
                         flat_var=render_settings.bubble_flat_var,
+                        text_alpha=render_settings.bubble_text_alpha,
                     )
                 except Exception:
                     logger.exception("Failed to recompute bubble style for block", exc_info=True)
@@ -644,6 +668,7 @@ class TextController:
             if style_obj is not None:
                 style_dict = style_obj.to_dict()
                 blk.font_color = '#{0:02X}{1:02X}{2:02X}'.format(*style_obj.text_rgb)
+                blk.font_alpha = int(style_obj.text_alpha)
                 blk.outline_color = '#{0:02X}{1:02X}{2:02X}'.format(*style_obj.outline_rgb)
                 blk.outline_width = style_obj.outline_width
             elif not recompute:
@@ -652,6 +677,7 @@ class TextController:
             else:
                 style_dict = self._plain_style_from_config(render_settings)
                 blk.font_color = '#{0:02X}{1:02X}{2:02X}'.format(*style_dict['text_rgb'])
+                blk.font_alpha = int(style_dict.get('text_alpha', 255))
                 blk.outline_color = '#{0:02X}{1:02X}{2:02X}'.format(*style_dict['outline_rgb'])
                 blk.outline_width = float(style_dict.get('outline_width', getattr(blk, 'outline_width', 2.0)))
 
@@ -1011,6 +1037,7 @@ class TextController:
         bubble_flat_var = float(bubble_config.get('bubble_flat_var', 8e-4))
         bubble_plain_alpha = int(bubble_config.get('bubble_plain_alpha', 230))
         text_target_contrast = float(bubble_config.get('text_target_contrast', 4.5))
+        bubble_text_alpha = int(bubble_config.get('bubble_text_alpha', 255))
         gradient_enabled = bool(bubble_config.get('bubble_gradient_enabled', False))
 
         def _rgb_tuple(key, default):
@@ -1035,6 +1062,7 @@ class TextController:
                 'bubble_flat_var': bubble_flat_var,
                 'bubble_plain_alpha': bubble_plain_alpha,
                 'text_target_contrast': text_target_contrast,
+                'bubble_text_alpha': bubble_text_alpha,
                 'bubble_gradient_enabled': gradient_enabled,
                 'bubble_gradient_start': gradient_start,
                 'bubble_gradient_end': gradient_end,
@@ -1067,6 +1095,7 @@ class TextController:
             bubble_flat_var = bubble_flat_var,
             bubble_plain_alpha = bubble_plain_alpha,
             text_target_contrast = text_target_contrast,
+            bubble_text_alpha = bubble_text_alpha,
             bubble_gradient_enabled = gradient_enabled,
             bubble_gradient_start = gradient_start,
             bubble_gradient_end = gradient_end,

@@ -24,6 +24,8 @@ def _normalize_bubble_style(style):
                 else:
                     grad_norm[gk] = gv
             normalised[key] = grad_norm
+        elif key == 'text_alpha':
+            normalised[key] = int(value)
         else:
             normalised[key] = value
     return normalised

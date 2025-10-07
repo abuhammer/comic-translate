@@ -22,6 +22,7 @@ class BubbleRenderStyle:
 
     fill_rgba: RgbaTuple
     text_rgb: RgbTuple
+    text_alpha: int
     outline_rgb: RgbTuple
     outline_width: float
     shadow_rgba: Optional[RgbaTuple]
@@ -35,6 +36,7 @@ class BubbleRenderStyle:
         data = {
             "fill_rgba": tuple(self.fill_rgba),
             "text_rgb": tuple(self.text_rgb),
+            "text_alpha": int(self.text_alpha),
             "outline_rgb": tuple(self.outline_rgb),
             "outline_width": float(self.outline_width),
             "shadow_rgba": tuple(self.shadow_rgba) if self.shadow_rgba else None,
@@ -354,6 +356,23 @@ def _choose_fill_and_text(
     return bubble_rgba_dynamic, text_rgb, contrast, reason, bubble_over
 
 
+def _extract_bbox(candidate: Optional[Sequence[float]]) -> Optional[Tuple[float, float, float, float]]:
+    if candidate is None:
+        return None
+
+    try:
+        arr = np.asarray(candidate, dtype=np.float32)
+    except Exception:
+        return None
+
+    if arr.size < 4:
+        return None
+
+    flat = arr.reshape(-1)
+    x0, y0, x1, y1 = (float(flat[i]) for i in range(4))
+    return x0, y0, x1, y1
+
+
 def compute_dynamic_bubble_style(
     image: np.ndarray,
     blk: TextBlock,
@@ -369,6 +388,7 @@ def compute_dynamic_bubble_style(
     plain_thresh_hi: float = 0.88,
     plain_thresh_lo: float = 0.12,
     flat_var: float = 8e-4,
+    text_alpha: Optional[int] = None,
     gradient_enabled: bool = False,
     gradient_start: Optional[Sequence[int]] = None,
     gradient_end: Optional[Sequence[int]] = None,
@@ -379,7 +399,9 @@ def compute_dynamic_bubble_style(
     if image is None or blk is None:
         return None
 
-    bbox_source = getattr(blk, "bubble_xyxy", None) or getattr(blk, "xyxy", None)
+    bbox_source = _extract_bbox(getattr(blk, "bubble_xyxy", None))
+    if bbox_source is None:
+        bbox_source = _extract_bbox(getattr(blk, "xyxy", None))
     if bbox_source is None:
         return None
 
@@ -486,9 +508,12 @@ def compute_dynamic_bubble_style(
             "end_rgba": (*end_rgb, alpha_value),
         }
 
+    text_alpha_value = int(np.clip(text_alpha if text_alpha is not None else 255, 0, 255))
+
     return BubbleRenderStyle(
         fill_rgba=fill_rgba,
         text_rgb=text_rgb,
+        text_alpha=text_alpha_value,
         outline_rgb=outline_rgb,
         outline_width=outline_width,
         shadow_rgba=shadow_rgba,

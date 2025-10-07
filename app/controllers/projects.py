@@ -243,6 +243,7 @@ class ProjectController:
         settings.setValue('bubble_flat_var', float(bubble_cfg.get('bubble_flat_var', 8e-4)))
         settings.setValue('bubble_plain_alpha', int(bubble_cfg.get('bubble_plain_alpha', 230)))
         settings.setValue('text_target_contrast', float(bubble_cfg.get('text_target_contrast', 4.5)))
+        settings.setValue('bubble_text_alpha', int(bubble_cfg.get('bubble_text_alpha', 255)))
         settings.setValue('bubble_gradient_enabled', bool(bubble_cfg.get('bubble_gradient_enabled', False)))
         settings.setValue('bubble_gradient_start', list(bubble_cfg.get('bubble_gradient_start', (35, 100, 160))))
         settings.setValue('bubble_gradient_end', list(bubble_cfg.get('bubble_gradient_end', (200, 220, 255))))
@@ -365,6 +366,7 @@ class ProjectController:
         bubble_flat_var = float(settings.value('bubble_flat_var', 8e-4))
         bubble_plain_alpha = int(settings.value('bubble_plain_alpha', 230, type=int))
         text_target_contrast = float(settings.value('text_target_contrast', 4.5))
+        bubble_text_alpha = int(settings.value('bubble_text_alpha', 255, type=int))
         bubble_gradient_enabled = settings.value('bubble_gradient_enabled', False, type=bool)
 
         def _parse_rgb(value, default):
@@ -412,6 +414,7 @@ class ProjectController:
                 'bubble_flat_var': bubble_flat_var,
                 'bubble_plain_alpha': bubble_plain_alpha,
                 'text_target_contrast': text_target_contrast,
+                'bubble_text_alpha': bubble_text_alpha,
                 'bubble_gradient_enabled': bubble_gradient_enabled,
                 'bubble_gradient_start': gradient_start,
                 'bubble_gradient_end': gradient_end,
@@ -450,6 +453,17 @@ class ProjectController:
             max_slider.blockSignals(True)
             max_slider.setValue(bubble_max_alpha)
             max_slider.blockSignals(False)
+
+        text_spin = getattr(self.main, 'bubble_text_alpha_spin', None)
+        if text_spin is not None:
+            text_spin.blockSignals(True)
+            text_spin.setValue(bubble_text_alpha)
+            text_spin.blockSignals(False)
+        text_slider = getattr(self.main, 'bubble_text_alpha_slider', None)
+        if text_slider is not None:
+            text_slider.blockSignals(True)
+            text_slider.setValue(bubble_text_alpha)
+            text_slider.blockSignals(False)
 
         plain_spin = getattr(self.main, 'bubble_plain_alpha_spin', None)
         if plain_spin is not None:

@@ -137,6 +137,8 @@ class TextBlockItem(QGraphicsTextItem):
                 normalised[key] = gradient_norm
             elif key == 'corner_radius':
                 normalised[key] = float(value)
+            elif key == 'text_alpha':
+                normalised[key] = int(value)
             else:
                 normalised[key] = value
 

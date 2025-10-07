@@ -21,6 +21,7 @@ def test_auto_mode_produces_tinted_bubble_on_plain_background():
     assert style.fill_rgba[3] >= 200
     # Prefer white text similar to the reference look.
     assert style.text_rgb == (255, 255, 255)
+    assert style.text_alpha == 255
     assert style.reason.startswith("dynamic")
 
 
@@ -34,6 +35,7 @@ def test_translucent_mode_keeps_high_opacity():
     assert style.fill_rgba[:3] != (255, 255, 255)
     assert style.fill_rgba[3] >= 225
     assert style.text_rgb == (255, 255, 255)
+    assert style.text_alpha == 255
     assert style.reason.startswith("dynamic")
 
 
