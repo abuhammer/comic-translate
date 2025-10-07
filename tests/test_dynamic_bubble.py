@@ -70,8 +70,8 @@ def test_foreground_text_does_not_confuse_background_sampling():
     assert style is not None
     assert style.fill_rgba[3] == 0
     # Dark background should produce white text even though bright strokes exist.
-    assert style.text_rgb == (255, 255, 255)
-    assert style.outline_rgb == (0, 0, 0)
+    assert all(channel >= 220 for channel in style.text_rgb)
+    assert all(channel <= 40 for channel in style.outline_rgb)
 
 
 def test_custom_colour_with_auto_contrast_adds_outline():

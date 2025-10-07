@@ -108,7 +108,13 @@ def _mean_variance_patch(
         patch = image[y0:y1, x0:x1]
 
     if patch.size == 0:
-        return (np.array([127.0, 127.0, 127.0], dtype=np.float32), 0.5, 0.0)
+        return (
+            np.array([127.0, 127.0, 127.0], dtype=np.float32),
+            0.5,
+            0.0,
+            None,
+            None,
+        )
 
     if patch.ndim == 2:
         patch = np.repeat(patch[:, :, None], 3, axis=2)
@@ -130,7 +136,13 @@ def _mean_variance_patch(
 
     flat_lum = luminance.reshape(-1)
     if flat_lum.size == 0:
-        return (np.array([127.0, 127.0, 127.0], dtype=np.float32), 0.5, 0.0)
+        return (
+            np.array([127.0, 127.0, 127.0], dtype=np.float32),
+            0.5,
+            0.0,
+            patch,
+            None,
+        )
 
     flat_rgb = patch_float.reshape(-1, 3)
 
@@ -139,7 +151,7 @@ def _mean_variance_patch(
     if np.isclose(lum_min, lum_max, atol=1e-6):
         mean_rgb = flat_rgb.mean(axis=0)
         mean_lum = float(flat_lum.mean())
-        return mean_rgb, mean_lum, 0.0
+        return mean_rgb, mean_lum, 0.0, patch, None
 
     centers = np.array([lum_min, lum_max], dtype=np.float32)
     labels = np.zeros_like(flat_lum, dtype=np.int32)
@@ -171,7 +183,12 @@ def _mean_variance_patch(
     background_lum = flat_lum[background_mask]
     mean_lum = float(background_lum.mean()) if background_lum.size else float(flat_lum.mean())
     variance = float(background_lum.var()) if background_lum.size else float(flat_lum.var())
-    return mean_rgb, mean_lum, variance
+    foreground_mask = ~background_mask
+    foreground_rgb = None
+    if np.any(foreground_mask):
+        foreground_rgb = flat_rgb[foreground_mask].mean(axis=0)
+
+    return mean_rgb, mean_lum, variance, patch, foreground_rgb
 
 
 def _clip_rgb(rgb: np.ndarray | Sequence[float]) -> np.ndarray:
@@ -302,7 +319,7 @@ def compute_dynamic_bubble_style(
     if bbox is None:
         return None
 
-    mean_rgb, mean_lum, variance = _mean_variance_patch(image, bbox, blk)
+    mean_rgb, mean_lum, variance, _, foreground_rgb = _mean_variance_patch(image, bbox, blk)
     mean_rgb = np.asarray(mean_rgb, dtype=np.float32)
     lum_std = float(np.sqrt(max(variance, 0.0)))
     flat_std_threshold = float(np.sqrt(max(flat_variance_threshold, 0.0)))
@@ -329,6 +346,12 @@ def compute_dynamic_bubble_style(
     is_plain_white = auto_contrast and mean_lum >= background_plain_hi and lum_std <= flat_std_threshold
     is_plain_black = auto_contrast and mean_lum <= background_plain_lo and lum_std <= flat_std_threshold
 
+    sampled_candidate: Optional[Tuple[int, int, int]] = None
+    sampled_ratio: float = -1.0
+    if auto_contrast and foreground_rgb is not None:
+        sampled_candidate = _as_int_tuple(foreground_rgb)
+        sampled_ratio = _contrast_for_rgb(sampled_candidate)
+
     if mode == "black":
         text_rgb = (0, 0, 0)
         reason = "user_black"
@@ -348,13 +371,22 @@ def compute_dynamic_bubble_style(
             reason = "plain_black_bg"
             plain_background = "black"
         elif auto_contrast:
+            candidates: list[Tuple[Tuple[int, int, int], str, float]] = []
+            if sampled_candidate is not None:
+                candidates.append((sampled_candidate, "sampled", sampled_ratio))
+            candidates.extend(
+                [
+                    ((0, 0, 0), "black", _contrast_for_rgb((0, 0, 0))),
+                    ((255, 255, 255), "white", _contrast_for_rgb((255, 255, 255))),
+                ]
+            )
+
             best_color = (0, 0, 0)
             best_label = "black"
             best_ratio = -1.0
             met_target = False
-            for cand_rgb, label in (((0, 0, 0), "black"), ((255, 255, 255), "white")):
-                ratio = _contrast_for_rgb(cand_rgb)
-                if ratio >= text_min_contrast and not met_target:
+            for cand_rgb, label, ratio in candidates:
+                if ratio >= text_min_contrast:
                     best_color = cand_rgb
                     best_label = label
                     best_ratio = ratio
@@ -390,7 +422,21 @@ def compute_dynamic_bubble_style(
             reason = f"{reason}_{ratio:.2f}"
 
     text_lum = _relative_luminance(_srgb_to_linear(np.array(text_rgb, dtype=np.float32)))
-    stroke_color = (0, 0, 0) if text_lum >= 0.5 else (255, 255, 255)
+
+    stroke_color_override: Optional[Tuple[int, int, int]] = None
+    if auto_contrast and sampled_candidate is not None and reason.startswith("dynamic_sampled"):
+        # When the sampled foreground passes the contrast target, mirror the
+        # user's original outline if one was detected.
+        if sampled_ratio >= text_min_contrast and sampled_ratio >= 0.0:
+            # Estimate outline as the opposite extreme by default; dedicated
+            # outline inference happens below when auto-stroke kicks in.
+            stroke_color_override = (0, 0, 0) if text_lum >= 0.5 else (255, 255, 255)
+
+    stroke_color = (
+        stroke_color_override
+        if stroke_color_override is not None
+        else ((0, 0, 0) if text_lum >= 0.5 else (255, 255, 255))
+    )
 
     stroke_active = bool(stroke_enabled)
     if plain_background and auto_contrast:
