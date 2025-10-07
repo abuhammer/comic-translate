@@ -9,7 +9,7 @@ from app.ui.canvas.rectangle import MoveableRectItem
 from app.ui.commands.box import AddRectangleCommand, BoxesChangeCommand
 
 from modules.detection.utils.geometry import do_rectangles_overlap
-from modules.utils.textblock import TextBlock
+from modules.utils.textblock import TextBlock, update_block_bounds
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -68,10 +68,15 @@ class RectItemController:
         for blk in self.main.blk_list:
             if do_rectangles_overlap(blk.xyxy, old_rect_coords, 0.2):
                 # Update the TextBlock coordinates
-                blk.xyxy[:] = [int(new_rect_coords[0]), 
-                               int(new_rect_coords[1]),
-                               int(new_rect_coords[2]), 
-                               int(new_rect_coords[3])]
+                update_block_bounds(
+                    blk,
+                    [
+                        int(new_rect_coords[0]),
+                        int(new_rect_coords[1]),
+                        int(new_rect_coords[2]),
+                        int(new_rect_coords[3]),
+                    ],
+                )
                 blk.angle = new_angle if new_angle else 0
                 blk.tr_origin_point = (new_tr_origin.x(), new_tr_origin.y()) if new_tr_origin else ()
                 break

@@ -14,7 +14,7 @@ from app.ui.commands.box import AddTextItemCommand
 from app.ui.canvas.text_item import TextBlockItem
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 
-from modules.utils.textblock import TextBlock
+from modules.utils.textblock import TextBlock, update_block_bounds
 from modules.rendering.render import TextRenderingSettings, manual_wrap
 from modules.rendering.dynamic_bubble import (
     compute_dynamic_bubble_style,
@@ -386,7 +386,13 @@ class TextController:
         updated_blk_list = []
         for blk in self.main.blk_list:
             blk_rect = tuple(blk.xyxy)
-            blk.xyxy[:] = [blk_rect[0] - diff, blk_rect[1] - diff, blk_rect[2] + diff, blk_rect[3] + diff]
+            new_coords = [
+                blk_rect[0] - diff,
+                blk_rect[1] - diff,
+                blk_rect[2] + diff,
+                blk_rect[3] + diff,
+            ]
+            update_block_bounds(blk, new_coords)
             updated_blk_list.append(blk)
         self.main.blk_list = updated_blk_list
         self.main.pipeline.load_box_coords(self.main.blk_list)

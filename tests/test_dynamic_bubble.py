@@ -4,7 +4,7 @@ from modules.rendering.dynamic_bubble import (
     compute_dynamic_bubble_style,
     image_overlaps_any_block,
 )
-from modules.utils.textblock import TextBlock
+from modules.utils.textblock import TextBlock, update_block_bounds
 
 
 def _make_block(x0=40, y0=40, x1=160, y1=120):
@@ -127,3 +127,30 @@ def test_image_cover_check_ignores_out_of_bounds_blocks():
 
     assert image_overlaps_any_block(image, [offscreen, valid])
     assert not image_overlaps_any_block(image, [offscreen])
+
+
+def test_update_block_bounds_syncs_bubble_coords():
+    blk = TextBlock(text_bbox=[10, 12, 40, 60], bubble_bbox=[10, 12, 40, 60])
+
+    update_block_bounds(blk, [100, 120, 180, 200])
+
+    assert tuple(int(v) for v in blk.xyxy[:4]) == (100, 120, 180, 200)
+    assert tuple(int(v) for v in blk.bubble_xyxy[:4]) == (100, 120, 180, 200)
+
+
+def test_dynamic_sampling_follows_updated_bounds():
+    image = np.zeros((220, 220, 3), dtype=np.uint8)
+    image[:110, :110] = 240  # bright quadrant
+    image[110:, 110:] = 15   # dark quadrant
+
+    blk = TextBlock(text_bbox=[20, 20, 80, 80], bubble_bbox=[20, 20, 80, 80])
+
+    bright_style = compute_dynamic_bubble_style(image, blk)
+    assert bright_style is not None
+    assert bright_style.text_rgb == (0, 0, 0)
+
+    update_block_bounds(blk, [140, 140, 200, 200])
+    dark_style = compute_dynamic_bubble_style(image, blk)
+
+    assert dark_style is not None
+    assert dark_style.text_rgb == (255, 255, 255)

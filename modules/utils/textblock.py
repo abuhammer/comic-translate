@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Sequence
 import numpy as np
 import copy
 from PIL import Image, ImageDraw
@@ -113,8 +113,50 @@ class TextBlock(object):
         new_block.outline_color = self.outline_color
         new_block.outline_width = getattr(self, 'outline_width', 1.0)
         new_block.bubble_style = copy.deepcopy(getattr(self, 'bubble_style', None))
-        
+
         return new_block
+
+
+def update_block_bounds(blk: "TextBlock", coords: Sequence[float]) -> None:
+    """Update a block's xyxy bounds and keep bubble bounds in sync.
+
+    Many parts of the UI mutate ``TextBlock.xyxy`` when users resize or move
+    translated text boxes.  Historically ``TextBlock.bubble_xyxy`` was left
+    untouched which meant downstream consumers – such as the adaptive colour
+    sampler – continued to sample the *old* bubble location.  As a result the
+    text colour/outline never reacted to the new background that the user
+    positioned the translation over.  This helper keeps the two coordinate
+    stores aligned whenever geometry changes.
+    """
+
+    if blk is None or coords is None:
+        return
+
+    arr = np.asarray(coords, dtype=np.float32).reshape(-1)
+    if arr.size < 4:
+        return
+
+    new_xyxy = [int(round(float(v))) for v in arr[:4]]
+
+    if isinstance(blk.xyxy, np.ndarray):
+        if blk.xyxy.size >= 4:
+            blk.xyxy[:4] = new_xyxy
+        else:
+            blk.xyxy = np.array(new_xyxy, dtype=np.int32)
+    else:
+        blk.xyxy = list(new_xyxy)
+
+    bubble = getattr(blk, "bubble_xyxy", None)
+    if bubble is None:
+        return
+
+    if isinstance(bubble, np.ndarray):
+        if bubble.size >= 4:
+            bubble[:4] = new_xyxy
+        else:
+            blk.bubble_xyxy = np.array(new_xyxy, dtype=np.int32)
+    else:
+        blk.bubble_xyxy = list(new_xyxy)
 
 def sort_blk_list(blk_list: List[TextBlock], right_to_left=True) -> List[TextBlock]:
     # Sort blk_list from right to left, top to bottom

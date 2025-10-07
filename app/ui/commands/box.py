@@ -7,6 +7,7 @@ from PySide6.QtCore import QRectF, QPointF
 from .base import RectCommandBase
 from ..canvas.rectangle import MoveableRectItem
 from ..canvas.text_item import TextBlockItem
+from modules.utils.textblock import update_block_bounds
 
 
 class AddRectangleCommand(QUndoCommand, RectCommandBase):
@@ -66,7 +67,7 @@ class BoxesChangeCommand(QUndoCommand, RectCommandBase):
             if (np.array_equal(blk.xyxy, self.old_xyxy) and
                 blk.angle == self.old_angle):
 
-                blk.xyxy[:] = self.new_xyxy
+                update_block_bounds(blk, self.new_xyxy)
                 blk.angle = self.new_angle
                 blk.tr_origin_point = self.new_tr_origin
 
@@ -85,7 +86,7 @@ class BoxesChangeCommand(QUndoCommand, RectCommandBase):
             if (np.array_equal(blk.xyxy, self.new_xyxy) and
                 blk.angle == self.new_angle ):
 
-                blk.xyxy[:] = self.old_xyxy
+                update_block_bounds(blk, self.old_xyxy)
                 blk.angle = self.old_angle
                 blk.tr_origin_point = self.old_tr_origin
 
