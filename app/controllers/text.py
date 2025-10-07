@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Iterable, Optional
 
 from PySide6 import QtCore
 from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QColorDialog
 
 from app.ui.commands.textformat import TextFormatCommand
 from app.ui.commands.box import AddTextItemCommand
@@ -15,6 +16,7 @@ from app.ui.canvas.text.text_item_properties import TextItemProperties
 
 from modules.utils.textblock import TextBlock
 from modules.rendering.render import TextRenderingSettings, manual_wrap
+from modules.rendering.dynamic_bubble import compute_dynamic_bubble_style
 from modules.utils.pipeline_utils import font_selected, get_language_code, \
     get_layout_direction, is_close
 from modules.utils.translator_utils import format_translations
@@ -29,15 +31,21 @@ class TextController:
         self.main = main
 
         # List of widgets to block signals for during manual rendering
-        self.widgets_to_block = [
-            self.main.font_dropdown,
-            self.main.font_size_dropdown,
-            self.main.line_spacing_dropdown,
-            self.main.block_font_color_button,
-            self.main.outline_font_color_button,
-            self.main.outline_width_dropdown,
-            self.main.outline_checkbox
+        widget_candidates = [
+            getattr(self.main, 'font_dropdown', None),
+            getattr(self.main, 'font_size_dropdown', None),
+            getattr(self.main, 'line_spacing_dropdown', None),
+            getattr(self.main, 'block_font_color_button', None),
+            getattr(self.main, 'outline_font_color_button', None),
+            getattr(self.main, 'outline_width_dropdown', None),
+            getattr(self.main, 'outline_checkbox', None),
+            getattr(self.main, 'bubble_mode_combo', None),
+            getattr(self.main, 'bubble_color_button', None),
+            getattr(self.main, 'bubble_min_alpha_spin', None),
+            getattr(self.main, 'bubble_max_alpha_spin', None),
+            getattr(self.main, 'bubble_plain_alpha_spin', None),
         ]
+        self.widgets_to_block = [widget for widget in widget_candidates if widget is not None]
 
     def connect_text_item_signals(self, text_item: TextBlockItem):
         text_item.item_selected.connect(self.on_text_item_selected)
@@ -45,6 +53,103 @@ class TextController:
         text_item.text_changed.connect(self.update_text_block_from_item)
         text_item.text_highlighted.connect(self.set_values_from_highlight)
         text_item.change_undo.connect(self.main.rect_item_ctrl.rect_change_undo)
+
+    def _update_bubble_color_button(self, color: QColor) -> None:
+        button = getattr(self.main, 'bubble_color_button', None)
+        if button is None or not color.isValid():
+            return
+        button.setStyleSheet(
+            f"background-color: {color.name()}; border: none; border-radius: 5px;"
+        )
+        button.setProperty('selected_color', color.name())
+        button.update()
+
+    @staticmethod
+    def _relative_luminance_rgb(rgb: tuple[int, int, int]) -> float:
+        def _linearise(component: float) -> float:
+            component /= 255.0
+            return component / 12.92 if component <= 0.04045 else ((component + 0.055) / 1.055) ** 2.4
+
+        r, g, b = rgb
+        r_lin = _linearise(r)
+        g_lin = _linearise(g)
+        b_lin = _linearise(b)
+        return 0.2126 * r_lin + 0.7152 * g_lin + 0.0722 * b_lin
+
+    def _item_matches_block(self, item: TextBlockItem, blk: TextBlock) -> bool:
+        if getattr(blk, 'xyxy', None) is None:
+            return False
+        bx, by = float(blk.xyxy[0]), float(blk.xyxy[1])
+        ix, iy = item.pos().x(), item.pos().y()
+        if abs(ix - bx) > 3.0 or abs(iy - by) > 3.0:
+            return False
+        angle_blk = float(getattr(blk, 'angle', 0.0) or 0.0)
+        if abs(item.rotation() - angle_blk) > 2.0:
+            return False
+        return True
+
+    def _find_text_item_for_block(self, blk: TextBlock) -> Optional[TextBlockItem]:
+        for item in getattr(self.main.image_viewer, 'text_items', []):
+            if isinstance(item, TextBlockItem) and self._item_matches_block(item, blk):
+                return item
+        return None
+
+    def _plain_style_from_config(self, render_settings: TextRenderingSettings) -> dict:
+        rgb = tuple(int(v) for v in render_settings.bubble_rgb[:3])
+        mode = (render_settings.bubble_mode or 'auto').lower()
+        if mode == 'plain':
+            alpha = int(render_settings.bubble_plain_alpha)
+        elif mode == 'translucent':
+            alpha = int(max(render_settings.bubble_max_alpha, render_settings.bubble_plain_alpha))
+        else:
+            alpha = int(render_settings.bubble_max_alpha)
+
+        fill_rgba = (*rgb, max(0, min(255, alpha)))
+        luminance = self._relative_luminance_rgb(rgb)
+        text_rgb = (0, 0, 0) if luminance >= 0.5 else (255, 255, 255)
+        outline_rgb = (0, 0, 0) if text_rgb == (255, 255, 255) else (255, 255, 255)
+
+        shadow_alpha = 120 if text_rgb == (255, 255, 255) else 90
+
+        return {
+            'fill_rgba': fill_rgba,
+            'text_rgb': text_rgb,
+            'outline_rgb': outline_rgb,
+            'outline_width': 2.0,
+            'shadow_rgba': (outline_rgb[0], outline_rgb[1], outline_rgb[2], shadow_alpha),
+            'shadow_offset': (0.0, 1.0),
+            'padding': (12.0, 8.0, 12.0, 8.0),
+            'corner_radius': 18.0,
+            'reason': 'plain_fallback',
+        }
+
+    def _apply_style_to_item(self, item: TextBlockItem, blk: TextBlock, style: Optional[dict]) -> None:
+        if style is None:
+            item.set_bubble_style(None)
+            blk.bubble_style = None
+            return
+
+        item.set_bubble_style(style)
+
+        text_rgb = style.get('text_rgb')
+        if text_rgb:
+            text_hex = '#{0:02X}{1:02X}{2:02X}'.format(*text_rgb[:3])
+            blk.font_color = text_hex
+            item.set_color(QColor(text_hex))
+
+        outline_rgb = style.get('outline_rgb')
+        outline_width = float(style.get('outline_width', getattr(blk, 'outline_width', 1.0)))
+        blk.outline_width = outline_width
+        if outline_rgb:
+            outline_hex = '#{0:02X}{1:02X}{2:02X}'.format(*outline_rgb[:3])
+            blk.outline_color = outline_hex
+            item.set_outline(QColor(outline_hex), outline_width)
+        else:
+            blk.outline_color = ''
+            item.set_outline(None, outline_width)
+
+        blk.bubble_style = copy.deepcopy(style)
+        item.update()
 
     def _get_current_base_image(self) -> Optional[np.ndarray]:
         """Return a copy of the original image for the active page."""
@@ -279,6 +384,131 @@ class TextController:
             updated_blk_list.append(blk)
         self.main.blk_list = updated_blk_list
         self.main.pipeline.load_box_coords(self.main.blk_list)
+
+    def on_bubble_mode_changed(self, *_):
+        combo = getattr(self.main, 'bubble_mode_combo', None)
+        if combo is None:
+            return
+        data = combo.currentData()
+        text = combo.currentText()
+        mode = (data or text or 'auto').lower()
+        if mode not in {'auto', 'plain', 'translucent'}:
+            mode = 'auto'
+        self.main.bubble_style_config['bubble_mode'] = mode
+        self.refresh_bubble_styles(recompute=True)
+
+    def on_bubble_color_change(self):
+        cfg = getattr(self.main, 'bubble_style_config', {})
+        current_rgb = tuple(int(v) for v in cfg.get('bubble_rgb', (35, 100, 160))[:3])
+        initial_color = QColor(*current_rgb)
+        color = QColorDialog.getColor(initial_color, self.main, self.main.tr('Bubble Color'))
+        if not color.isValid():
+            return
+        cfg['bubble_rgb'] = (color.red(), color.green(), color.blue())
+        self._update_bubble_color_button(color)
+        self.refresh_bubble_styles(recompute=True)
+
+    def on_bubble_min_alpha_change(self, value: int):
+        cfg = getattr(self.main, 'bubble_style_config', {})
+        value = int(value)
+        cfg['bubble_min_alpha'] = value
+        max_alpha = int(cfg.get('bubble_max_alpha', value))
+        if value > max_alpha:
+            cfg['bubble_max_alpha'] = value
+            spin = getattr(self.main, 'bubble_max_alpha_spin', None)
+            if spin is not None:
+                spin.blockSignals(True)
+                spin.setValue(value)
+                spin.blockSignals(False)
+        self.refresh_bubble_styles(recompute=True)
+
+    def on_bubble_max_alpha_change(self, value: int):
+        cfg = getattr(self.main, 'bubble_style_config', {})
+        value = int(value)
+        cfg['bubble_max_alpha'] = value
+        min_alpha = int(cfg.get('bubble_min_alpha', value))
+        if value < min_alpha:
+            cfg['bubble_min_alpha'] = value
+            spin = getattr(self.main, 'bubble_min_alpha_spin', None)
+            if spin is not None:
+                spin.blockSignals(True)
+                spin.setValue(value)
+                spin.blockSignals(False)
+        plain_alpha = int(cfg.get('bubble_plain_alpha', value))
+        if value > plain_alpha:
+            cfg['bubble_plain_alpha'] = value
+            spin_plain = getattr(self.main, 'bubble_plain_alpha_spin', None)
+            if spin_plain is not None:
+                spin_plain.blockSignals(True)
+                spin_plain.setValue(value)
+                spin_plain.blockSignals(False)
+        self.refresh_bubble_styles(recompute=True)
+
+    def on_bubble_plain_alpha_change(self, value: int):
+        cfg = getattr(self.main, 'bubble_style_config', {})
+        value = int(value)
+        cfg['bubble_plain_alpha'] = value
+        max_alpha = int(cfg.get('bubble_max_alpha', value))
+        if value < max_alpha:
+            cfg['bubble_max_alpha'] = value
+            spin = getattr(self.main, 'bubble_max_alpha_spin', None)
+            if spin is not None:
+                spin.blockSignals(True)
+                spin.setValue(value)
+                spin.blockSignals(False)
+        self.refresh_bubble_styles(recompute=True)
+
+    def refresh_bubble_styles(self, recompute: bool = False) -> None:
+        text_items = getattr(self.main.image_viewer, 'text_items', [])
+        if not text_items or not getattr(self.main, 'blk_list', []):
+            return
+
+        render_settings = self.render_settings()
+        background_image = None
+        if recompute:
+            background_image = self._prepare_background_image(self.main.blk_list, render_settings)
+
+        for blk in self.main.blk_list:
+            item = self._find_text_item_for_block(blk)
+            if item is None:
+                continue
+
+            style_dict = None
+            style_obj = None
+
+            if recompute and background_image is not None:
+                try:
+                    style_obj = compute_dynamic_bubble_style(
+                        background_image,
+                        blk,
+                        bubble_rgb=render_settings.bubble_rgb,
+                        min_alpha=render_settings.bubble_min_alpha,
+                        max_alpha=render_settings.bubble_max_alpha,
+                        text_min_contrast=render_settings.text_target_contrast,
+                        bubble_mode=render_settings.bubble_mode,
+                        plain_alpha=render_settings.bubble_plain_alpha,
+                        plain_thresh_hi=render_settings.bubble_plain_hi,
+                        plain_thresh_lo=render_settings.bubble_plain_lo,
+                        flat_var=render_settings.bubble_flat_var,
+                    )
+                except Exception:
+                    logger.exception("Failed to recompute bubble style for block", exc_info=True)
+
+            if style_obj is not None:
+                style_dict = style_obj.to_dict()
+                blk.font_color = '#{0:02X}{1:02X}{2:02X}'.format(*style_obj.text_rgb)
+                blk.outline_color = '#{0:02X}{1:02X}{2:02X}'.format(*style_obj.outline_rgb)
+                blk.outline_width = style_obj.outline_width
+            elif not recompute:
+                existing_style = getattr(blk, 'bubble_style', None)
+                style_dict = copy.deepcopy(existing_style) if existing_style else None
+            else:
+                style_dict = self._plain_style_from_config(render_settings)
+                blk.font_color = '#{0:02X}{1:02X}{2:02X}'.format(*style_dict['text_rgb'])
+                blk.outline_color = '#{0:02X}{1:02X}{2:02X}'.format(*style_dict['outline_rgb'])
+                blk.outline_width = float(style_dict.get('outline_width', getattr(blk, 'outline_width', 2.0)))
+
+            self._apply_style_to_item(item, blk, style_dict)
 
     # Formatting actions
     def on_font_dropdown_change(self, font_family: str):

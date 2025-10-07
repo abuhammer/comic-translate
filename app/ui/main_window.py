@@ -5,7 +5,7 @@ from PySide6.QtGui import QIntValidator
 from PySide6.QtCore import QSettings
 from PySide6.QtGui import QFont, QFontDatabase
 
-from .dayu_widgets import dayu_theme
+from .dayu_widgets import dayu_theme, MSpinBox
 from .dayu_widgets.divider import MDivider
 from .dayu_widgets.combo_box import MComboBox, MFontComboBox
 from .dayu_widgets.check_box import MCheckBox
@@ -528,12 +528,59 @@ class ComicTranslateUI(QtWidgets.QMainWindow):
         outline_settings_layout.addWidget(self.outline_width_dropdown)
         outline_settings_layout.addStretch()
 
+        # Bubble styling controls
+        bubble_cfg = getattr(self, 'bubble_style_config', {
+            'bubble_rgb': (35, 100, 160),
+            'bubble_min_alpha': 110,
+            'bubble_max_alpha': 205,
+            'bubble_plain_alpha': 230,
+        })
+
+        bubble_settings_layout = QtWidgets.QGridLayout()
+        bubble_settings_layout.setHorizontalSpacing(8)
+        bubble_settings_layout.setVerticalSpacing(6)
+
+        bubble_color_label = QtWidgets.QLabel(self.tr('Bubble Color'))
+        self.bubble_color_button = QtWidgets.QPushButton()
+        self.bubble_color_button.setFixedSize(30, 30)
+        bubble_rgb = tuple(int(v) for v in bubble_cfg.get('bubble_rgb', (35, 100, 160))[:3])
+        bubble_hex = '#{0:02X}{1:02X}{2:02X}'.format(*bubble_rgb)
+        self.bubble_color_button.setStyleSheet(
+            f"background-color: {bubble_hex}; border: none; border-radius: 5px;"
+        )
+        self.bubble_color_button.setProperty('selected_color', bubble_hex)
+
+        bubble_min_alpha_label = QtWidgets.QLabel(self.tr('Min Alpha'))
+        self.bubble_min_alpha_spin = MSpinBox().small()
+        self.bubble_min_alpha_spin.setRange(0, 255)
+        self.bubble_min_alpha_spin.setValue(int(bubble_cfg.get('bubble_min_alpha', 110)))
+
+        bubble_max_alpha_label = QtWidgets.QLabel(self.tr('Max Alpha'))
+        self.bubble_max_alpha_spin = MSpinBox().small()
+        self.bubble_max_alpha_spin.setRange(0, 255)
+        self.bubble_max_alpha_spin.setValue(int(bubble_cfg.get('bubble_max_alpha', 205)))
+
+        bubble_plain_alpha_label = QtWidgets.QLabel(self.tr('Plain Alpha'))
+        self.bubble_plain_alpha_spin = MSpinBox().small()
+        self.bubble_plain_alpha_spin.setRange(0, 255)
+        self.bubble_plain_alpha_spin.setValue(int(bubble_cfg.get('bubble_plain_alpha', 230)))
+
+        bubble_settings_layout.addWidget(bubble_color_label, 0, 0)
+        bubble_settings_layout.addWidget(self.bubble_color_button, 0, 1)
+        bubble_settings_layout.addWidget(bubble_min_alpha_label, 1, 0)
+        bubble_settings_layout.addWidget(self.bubble_min_alpha_spin, 1, 1)
+        bubble_settings_layout.addWidget(bubble_max_alpha_label, 2, 0)
+        bubble_settings_layout.addWidget(self.bubble_max_alpha_spin, 2, 1)
+        bubble_settings_layout.addWidget(bubble_plain_alpha_label, 3, 0)
+        bubble_settings_layout.addWidget(self.bubble_plain_alpha_spin, 3, 1)
+
         rendering_divider_top = MDivider()
         rendering_divider_bottom = MDivider()
         text_render_layout.addWidget(rendering_divider_top)
         text_render_layout.addLayout(font_settings_layout)
         text_render_layout.addLayout(main_text_settings_layout)
         text_render_layout.addLayout(outline_settings_layout)
+        text_render_layout.addLayout(bubble_settings_layout)
         text_render_layout.addWidget(rendering_divider_bottom)
 
         # Tools Layout

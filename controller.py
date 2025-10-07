@@ -215,6 +215,17 @@ class ComicTranslate(ComicTranslateUI):
         self.outline_width_dropdown.currentTextChanged.connect(self.text_ctrl.on_outline_width_change)
         self.outline_checkbox.stateChanged.connect(self.text_ctrl.toggle_outline_settings)
 
+        if getattr(self, 'bubble_mode_combo', None):
+            self.bubble_mode_combo.currentIndexChanged.connect(self.text_ctrl.on_bubble_mode_changed)
+        if getattr(self, 'bubble_color_button', None):
+            self.bubble_color_button.clicked.connect(self.text_ctrl.on_bubble_color_change)
+        if getattr(self, 'bubble_min_alpha_spin', None):
+            self.bubble_min_alpha_spin.valueChanged.connect(self.text_ctrl.on_bubble_min_alpha_change)
+        if getattr(self, 'bubble_max_alpha_spin', None):
+            self.bubble_max_alpha_spin.valueChanged.connect(self.text_ctrl.on_bubble_max_alpha_change)
+        if getattr(self, 'bubble_plain_alpha_spin', None):
+            self.bubble_plain_alpha_spin.valueChanged.connect(self.text_ctrl.on_bubble_plain_alpha_change)
+
         # Page List
         self.page_list.currentItemChanged.connect(self.image_ctrl.on_card_selected)
         self.page_list.selection_changed.connect(self.image_ctrl.on_selection_changed)

@@ -383,6 +383,34 @@ class ProjectController:
                 'text_target_contrast': text_target_contrast,
             }
         )
+
+        color_button = getattr(self.main, 'bubble_color_button', None)
+        if color_button is not None:
+            bubble_hex = '#{0:02X}{1:02X}{2:02X}'.format(*bubble_rgb)
+            color_button.blockSignals(True)
+            color_button.setStyleSheet(
+                f"background-color: {bubble_hex}; border: none; border-radius: 5px;"
+            )
+            color_button.setProperty('selected_color', bubble_hex)
+            color_button.blockSignals(False)
+
+        min_spin = getattr(self.main, 'bubble_min_alpha_spin', None)
+        if min_spin is not None:
+            min_spin.blockSignals(True)
+            min_spin.setValue(bubble_min_alpha)
+            min_spin.blockSignals(False)
+
+        max_spin = getattr(self.main, 'bubble_max_alpha_spin', None)
+        if max_spin is not None:
+            max_spin.blockSignals(True)
+            max_spin.setValue(bubble_max_alpha)
+            max_spin.blockSignals(False)
+
+        plain_spin = getattr(self.main, 'bubble_plain_alpha_spin', None)
+        if plain_spin is not None:
+            plain_spin.blockSignals(True)
+            plain_spin.setValue(bubble_plain_alpha)
+            plain_spin.blockSignals(False)
         settings.endGroup()
 
     def process_group(self, group_key, group_value, settings_obj: QSettings):
