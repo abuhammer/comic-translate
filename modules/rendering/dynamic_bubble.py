@@ -176,6 +176,40 @@ def _normalise_ratio_value(value: float) -> float:
     return float(np.clip(value, 0.0, 1.0))
 
 
+def image_overlaps_any_block(
+    image: Optional[np.ndarray], blocks: Iterable[TextBlock]
+) -> bool:
+    """Return True if the image intersects at least one block."""
+
+    if image is None or getattr(image, "size", 0) == 0:
+        return False
+
+    height, width = image.shape[:2]
+    for blk in blocks:
+        coords = getattr(blk, "xyxy", None)
+        if coords is None:
+            continue
+
+        try:
+            arr = np.asarray(coords, dtype=np.float32).reshape(-1)
+        except Exception:
+            continue
+
+        if arr.size < 4:
+            continue
+
+        x0, y0, x1, y1 = (float(arr[i]) for i in range(4))
+
+        if x1 <= 0 or y1 <= 0:
+            continue
+        if x0 >= width or y0 >= height:
+            continue
+
+        return True
+
+    return False
+
+
 def compute_dynamic_bubble_style(
     image: np.ndarray,
     blk: TextBlock,
@@ -392,4 +426,8 @@ def compute_dynamic_bubble_style(
     )
 
 
-__all__ = ["BubbleRenderStyle", "compute_dynamic_bubble_style"]
+__all__ = [
+    "BubbleRenderStyle",
+    "compute_dynamic_bubble_style",
+    "image_overlaps_any_block",
+]

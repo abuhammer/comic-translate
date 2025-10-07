@@ -16,7 +16,10 @@ from app.ui.canvas.text.text_item_properties import TextItemProperties
 
 from modules.utils.textblock import TextBlock
 from modules.rendering.render import TextRenderingSettings, manual_wrap
-from modules.rendering.dynamic_bubble import compute_dynamic_bubble_style
+from modules.rendering.dynamic_bubble import (
+    compute_dynamic_bubble_style,
+    image_overlaps_any_block,
+)
 from modules.utils.pipeline_utils import font_selected, get_language_code, \
     get_layout_direction, is_close
 from modules.utils.translator_utils import format_translations
@@ -200,32 +203,6 @@ class TextController:
             logger.exception("Failed to copy base image for adaptive colours")
             return None
 
-    @staticmethod
-    def _image_covers_blocks(
-        image: Optional[np.ndarray], blocks: Iterable[TextBlock]
-    ) -> bool:
-        """Ensure every block lies within the provided image bounds."""
-
-        if image is None or getattr(image, "size", 0) == 0:
-            return False
-
-        height, width = image.shape[:2]
-        for blk in blocks:
-            if getattr(blk, "xyxy", None) is None:
-                continue
-
-            try:
-                x1, y1, x2, y2 = (int(v) for v in blk.xyxy)
-            except Exception:
-                return False
-
-            if x1 < 0 or y1 < 0:
-                return False
-            if x2 > width or y2 > height:
-                return False
-
-        return True
-
     def _prepare_background_image(
         self,
         blocks: Iterable[TextBlock],
@@ -258,10 +235,10 @@ class TextController:
         # Prefer the unmodified base image because block coordinates are derived
         # from the original detection resolution. Fall back to the viewer capture
         # only when the base image is unavailable or does not cover the blocks.
-        if base_image is not None and self._image_covers_blocks(base_image, blocks):
+        if base_image is not None and image_overlaps_any_block(base_image, blocks):
             return base_image
 
-        if viewer_image is not None and self._image_covers_blocks(viewer_image, blocks):
+        if viewer_image is not None and image_overlaps_any_block(viewer_image, blocks):
             return viewer_image
 
         return base_image if base_image is not None else viewer_image
@@ -549,6 +526,7 @@ class TextController:
 
         render_settings = self.render_settings()
         background_image = None
+        fallback_image = None
         if recompute:
             background_image = self._prepare_background_image(self.main.blk_list, render_settings)
 
@@ -560,10 +538,16 @@ class TextController:
             style_dict = None
             style_obj = None
 
-            if recompute and background_image is not None:
+            block_image = background_image
+            if recompute and block_image is None:
+                if fallback_image is None:
+                    fallback_image = self._prepare_background_image([blk], render_settings)
+                block_image = fallback_image
+
+            if recompute and block_image is not None:
                 try:
                     style_obj = compute_dynamic_bubble_style(
-                        background_image,
+                        block_image,
                         blk,
                         bubble_rgb=render_settings.bubble_rgb,
                         background_box_mode=render_settings.background_box_mode,

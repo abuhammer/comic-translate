@@ -1,6 +1,9 @@
 import numpy as np
 
-from modules.rendering.dynamic_bubble import compute_dynamic_bubble_style
+from modules.rendering.dynamic_bubble import (
+    compute_dynamic_bubble_style,
+    image_overlaps_any_block,
+)
 from modules.utils.textblock import TextBlock
 
 
@@ -115,3 +118,12 @@ def test_auto_background_box_adds_tint_when_contrast_low():
     assert style.fill_rgba[3] > 0
     assert style.fill_rgba[:3] == (35, 100, 160)
     assert style.fill_rgba[3] <= int(0.3 * 255 + 1)
+
+
+def test_image_cover_check_ignores_out_of_bounds_blocks():
+    image = np.zeros((120, 120, 3), dtype=np.uint8)
+    valid = TextBlock(text_bbox=[10, 10, 40, 40], bubble_bbox=[10, 10, 40, 40])
+    offscreen = TextBlock(text_bbox=[150, 150, 210, 220], bubble_bbox=[150, 150, 210, 220])
+
+    assert image_overlaps_any_block(image, [offscreen, valid])
+    assert not image_overlaps_any_block(image, [offscreen])
