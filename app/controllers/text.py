@@ -323,6 +323,7 @@ class TextController:
 
         command = AddTextItemCommand(self.main, text_item)
         self.main.push_command(command)
+        self.refresh_bubble_styles(recompute=True)
 
     def on_text_item_selected(self, text_item: TextBlockItem):
         self.main.curr_tblock_item = text_item

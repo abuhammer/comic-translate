@@ -578,6 +578,7 @@ class ImageStateController:
                     self.main.rect_item_ctrl.connect_rect_item_signals(rect_item)
 
                 self.load_patch_state(file_path)
+                self.main.text_ctrl.refresh_bubble_styles(recompute=True)
             else:
                 # New image - just set language preferences and clear everything else
                 self.main.blk_list = []

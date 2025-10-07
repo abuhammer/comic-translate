@@ -1,4 +1,6 @@
+import logging
 import numpy as np
+from typing import Callable, Optional
 from PySide6.QtGui import QUndoCommand
 from PySide6.QtCore import QRectF, QPointF
 
@@ -36,12 +38,20 @@ class AddRectangleCommand(QUndoCommand, RectCommandBase):
             self.blk_list.remove(matching_blk)
 
 class BoxesChangeCommand(QUndoCommand, RectCommandBase):
-    def __init__(self, viewer, old_state, new_state, blk_list):
+    def __init__(
+        self,
+        viewer,
+        old_state,
+        new_state,
+        blk_list,
+        on_geometry_changed: Optional[Callable[[], None]] = None,
+    ):
         super().__init__()
         self.viewer = viewer
         self.scene = self.viewer._scene
         self.blk_list = blk_list
-        
+        self._on_geometry_changed = on_geometry_changed
+
         self.old_xyxy = [int(c) for c in old_state.rect]
         self.old_angle = old_state.rotation
         self.old_tr_origin = (old_state.transform_origin.x(), old_state.transform_origin.y())
@@ -51,30 +61,52 @@ class BoxesChangeCommand(QUndoCommand, RectCommandBase):
         self.new_tr_origin = (new_state.transform_origin.x(), new_state.transform_origin.y())
 
     def redo(self):
+        changed = False
         for blk in self.blk_list:
             if (np.array_equal(blk.xyxy, self.old_xyxy) and
                 blk.angle == self.old_angle):
-            
+
                 blk.xyxy[:] = self.new_xyxy
                 blk.angle = self.new_angle
                 blk.tr_origin_point = self.new_tr_origin
 
-                self.find_and_update_item(self.scene, self.old_xyxy, self.old_angle, 
+                self.find_and_update_item(self.scene, self.old_xyxy, self.old_angle,
                                                 self.new_xyxy, self.new_angle, self.new_tr_origin)
                 self.scene.update()
+                changed = True
+                break
+
+        if changed:
+            self._emit_geometry_changed()
 
     def undo(self):
+        changed = False
         for blk in self.blk_list:
             if (np.array_equal(blk.xyxy, self.new_xyxy) and
                 blk.angle == self.new_angle ):
-                
+
                 blk.xyxy[:] = self.old_xyxy
                 blk.angle = self.old_angle
                 blk.tr_origin_point = self.old_tr_origin
 
-                self.find_and_update_item(self.scene, self.new_xyxy, self.new_angle, 
+                self.find_and_update_item(self.scene, self.new_xyxy, self.new_angle,
                                         self.old_xyxy, self.old_angle, self.old_tr_origin)
                 self.scene.update()
+                changed = True
+                break
+
+        if changed:
+            self._emit_geometry_changed()
+
+    def _emit_geometry_changed(self) -> None:
+        if not self._on_geometry_changed:
+            return
+        try:
+            self._on_geometry_changed()
+        except Exception:  # pragma: no cover - defensive logging
+            logging.getLogger(__name__).exception(
+                "Failed to propagate geometry change callback"
+            )
 
     @staticmethod
     def find_and_update_item(scene, old_xyxy, old_angle, new_xyxy, new_angle, new_tr_origin):

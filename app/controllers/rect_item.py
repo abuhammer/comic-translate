@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import numpy as np
 from typing import TYPE_CHECKING
 from PySide6.QtCore import QRectF, QPointF
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
 class RectItemController:
     def __init__(self, main: ComicTranslate):
         self.main = main
+        self._logger = logging.getLogger(__name__)
 
     def connect_rect_item_signals(self, rect_item: MoveableRectItem):
         rect_item.signals.change_undo.connect(self.rect_change_undo)
@@ -75,15 +77,23 @@ class RectItemController:
                 break
 
     def rect_change_undo(self, old_state, new_state):
-        command = BoxesChangeCommand(self.main.image_viewer, old_state,
-                                         new_state, self.main.blk_list)
-        self.main.undo_group.activeStack().push(command)
-        self.handle_rectangle_change(
-            old_state.rect, 
-            new_state.rect,
-            new_state.rotation,
-            new_state.transform_origin
+        command = BoxesChangeCommand(
+            self.main.image_viewer,
+            old_state,
+            new_state,
+            self.main.blk_list,
+            on_geometry_changed=self._refresh_text_styles,
         )
+        self.main.undo_group.activeStack().push(command)
+
+    def _refresh_text_styles(self) -> None:
+        text_ctrl = getattr(self.main, 'text_ctrl', None)
+        if not text_ctrl:
+            return
+        try:
+            text_ctrl.refresh_bubble_styles(recompute=True)
+        except Exception:  # pragma: no cover - defensive logging
+            self._logger.exception("Failed to refresh bubble styles after geometry change")
 
 
     def find_corresponding_text_block(self, rect: tuple[float], iou_threshold: int = 0.5):
