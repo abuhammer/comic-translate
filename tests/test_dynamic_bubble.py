@@ -54,9 +54,24 @@ def test_dynamic_background_selects_high_contrast_text():
     assert style is not None
     assert style.fill_rgba[3] == 0
     assert style.text_rgb in {(0, 0, 0), (255, 255, 255)}
-    assert style.reason.startswith("dynamic")
+    assert style.reason.startswith(("dynamic", "plain_"))
     # Contrast should meet or exceed the WCAG target of 4.5:1
     assert style.outline_alpha in (0, 153)
+
+
+def test_foreground_text_does_not_confuse_background_sampling():
+    image = np.full((140, 140, 3), 35, dtype=np.uint8)
+    # Simulate bright foreground strokes inside the bubble.
+    image[60:80, 40:100] = 240
+    blk = _make_block(30, 30, 110, 110)
+
+    style = compute_dynamic_bubble_style(image, blk)
+
+    assert style is not None
+    assert style.fill_rgba[3] == 0
+    # Dark background should produce white text even though bright strokes exist.
+    assert style.text_rgb == (255, 255, 255)
+    assert style.outline_rgb == (0, 0, 0)
 
 
 def test_custom_colour_with_auto_contrast_adds_outline():

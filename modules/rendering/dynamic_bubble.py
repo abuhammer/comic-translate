@@ -9,6 +9,7 @@ from typing import Iterable, Optional, Sequence, Tuple
 import numpy as np
 
 from ..utils.textblock import TextBlock
+from .adaptive_color import sample_block_background
 
 logger = logging.getLogger(__name__)
 
@@ -89,15 +90,30 @@ def _relative_luminance(rgb: np.ndarray | Iterable[float]) -> float:
 
 
 def _mean_variance_patch(
-    image: np.ndarray, bbox: Tuple[int, int, int, int], sample_limit: int = 16
+    image: np.ndarray,
+    bbox: Tuple[int, int, int, int],
+    blk: Optional[TextBlock] = None,
+    sample_limit: int = 16,
 ):
     x0, y0, x1, y1 = bbox
-    patch = image[y0:y1, x0:x1]
+
+    patch: Optional[np.ndarray] = None
+    if blk is not None:
+        try:
+            patch = sample_block_background(image, blk)
+        except Exception:
+            patch = None
+
+    if patch is None or patch.size == 0:
+        patch = image[y0:y1, x0:x1]
+
     if patch.size == 0:
         return (np.array([127.0, 127.0, 127.0], dtype=np.float32), 0.5, 0.0)
 
     if patch.ndim == 2:
-        patch = np.expand_dims(patch, axis=-1)
+        patch = np.repeat(patch[:, :, None], 3, axis=2)
+    elif patch.ndim == 3 and patch.shape[2] > 3:
+        patch = patch[:, :, :3]
 
     if sample_limit > 0:
         step_y = max(1, patch.shape[0] // sample_limit)
@@ -105,15 +121,56 @@ def _mean_variance_patch(
         patch = patch[::step_y, ::step_x]
 
     patch_float = patch.astype(np.float32)
-    mean_rgb = patch_float.reshape(-1, patch.shape[-1]).mean(axis=0)
-    luminance = _srgb_to_linear(patch_float)
+    patch_linear = _srgb_to_linear(patch_float)
     luminance = (
-        0.2126 * luminance[..., 0]
-        + 0.7152 * luminance[..., 1]
-        + 0.0722 * luminance[..., 2]
+        0.2126 * patch_linear[..., 0]
+        + 0.7152 * patch_linear[..., 1]
+        + 0.0722 * patch_linear[..., 2]
     )
-    mean_lum = float(luminance.mean()) if luminance.size else 0.5
-    variance = float(luminance.var()) if luminance.size else 0.0
+
+    flat_lum = luminance.reshape(-1)
+    if flat_lum.size == 0:
+        return (np.array([127.0, 127.0, 127.0], dtype=np.float32), 0.5, 0.0)
+
+    flat_rgb = patch_float.reshape(-1, 3)
+
+    lum_min = float(np.min(flat_lum))
+    lum_max = float(np.max(flat_lum))
+    if np.isclose(lum_min, lum_max, atol=1e-6):
+        mean_rgb = flat_rgb.mean(axis=0)
+        mean_lum = float(flat_lum.mean())
+        return mean_rgb, mean_lum, 0.0
+
+    centers = np.array([lum_min, lum_max], dtype=np.float32)
+    labels = np.zeros_like(flat_lum, dtype=np.int32)
+
+    for _ in range(8):
+        distances = np.abs(flat_lum[:, None] - centers[None, :])
+        new_labels = np.argmin(distances, axis=1)
+        if np.array_equal(new_labels, labels):
+            break
+        labels = new_labels
+        for idx in range(2):
+            members = flat_lum[labels == idx]
+            if members.size:
+                centers[idx] = float(np.mean(members))
+
+    counts = np.array([(labels == idx).sum() for idx in range(2)], dtype=np.int64)
+    background_idx = int(np.argmax(counts)) if counts.sum() else 0
+    if counts.sum() == 0 or counts[background_idx] == 0:
+        background_mask = np.ones_like(flat_lum, dtype=bool)
+    else:
+        background_mask = labels == background_idx
+
+    background_rgb = flat_rgb[background_mask]
+    if background_rgb.size == 0:
+        background_rgb = flat_rgb
+        background_mask = np.ones_like(flat_lum, dtype=bool)
+
+    mean_rgb = background_rgb.mean(axis=0)
+    background_lum = flat_lum[background_mask]
+    mean_lum = float(background_lum.mean()) if background_lum.size else float(flat_lum.mean())
+    variance = float(background_lum.var()) if background_lum.size else float(flat_lum.var())
     return mean_rgb, mean_lum, variance
 
 
@@ -245,7 +302,7 @@ def compute_dynamic_bubble_style(
     if bbox is None:
         return None
 
-    mean_rgb, mean_lum, variance = _mean_variance_patch(image, bbox)
+    mean_rgb, mean_lum, variance = _mean_variance_patch(image, bbox, blk)
     mean_rgb = np.asarray(mean_rgb, dtype=np.float32)
     lum_std = float(np.sqrt(max(variance, 0.0)))
     flat_std_threshold = float(np.sqrt(max(flat_variance_threshold, 0.0)))
