@@ -614,6 +614,41 @@ class TextController:
         target_lang = self.main.lang_mapping.get(self.main.t_combo.currentText(), None)
         direction = get_layout_direction(target_lang)
 
+        bubble_mode = 'auto'
+        if hasattr(self.main, 'bubble_mode_combo'):
+            combo = self.main.bubble_mode_combo
+            data = combo.currentData()
+            bubble_mode = (data or combo.currentText() or 'auto').lower()
+
+        bubble_config = getattr(self.main, 'bubble_style_config', {})
+        bubble_rgb = bubble_config.get('bubble_rgb', (35, 100, 160))
+        if isinstance(bubble_rgb, (list, tuple)):
+            bubble_rgb = tuple(int(v) for v in bubble_rgb[:3])
+        else:
+            bubble_rgb = (35, 100, 160)
+        bubble_min_alpha = int(bubble_config.get('bubble_min_alpha', 110))
+        bubble_max_alpha = int(bubble_config.get('bubble_max_alpha', 205))
+        bubble_plain_hi = float(bubble_config.get('bubble_plain_hi', 0.88))
+        bubble_plain_lo = float(bubble_config.get('bubble_plain_lo', 0.12))
+        bubble_flat_var = float(bubble_config.get('bubble_flat_var', 8e-4))
+        bubble_plain_alpha = int(bubble_config.get('bubble_plain_alpha', 230))
+        text_target_contrast = float(bubble_config.get('text_target_contrast', 4.5))
+
+        # Keep the configuration in sync so project saves persist overrides
+        self.main.bubble_style_config.update(
+            {
+                'bubble_mode': bubble_mode,
+                'bubble_rgb': bubble_rgb,
+                'bubble_min_alpha': bubble_min_alpha,
+                'bubble_max_alpha': bubble_max_alpha,
+                'bubble_plain_hi': bubble_plain_hi,
+                'bubble_plain_lo': bubble_plain_lo,
+                'bubble_flat_var': bubble_flat_var,
+                'bubble_plain_alpha': bubble_plain_alpha,
+                'text_target_contrast': text_target_contrast,
+            }
+        )
+
         return TextRenderingSettings(
             alignment_id = self.main.alignment_tool_group.get_dayu_checked(),
             font_family = self.main.font_dropdown.currentText(),
@@ -628,5 +663,14 @@ class TextController:
             italic = self.main.italic_button.isChecked(),
             underline = self.main.underline_button.isChecked(),
             line_spacing = self.main.line_spacing_dropdown.currentText(),
-            direction = direction
+            direction = direction,
+            bubble_mode = bubble_mode,
+            bubble_rgb = bubble_rgb,
+            bubble_min_alpha = bubble_min_alpha,
+            bubble_max_alpha = bubble_max_alpha,
+            bubble_plain_hi = bubble_plain_hi,
+            bubble_plain_lo = bubble_plain_lo,
+            bubble_flat_var = bubble_flat_var,
+            bubble_plain_alpha = bubble_plain_alpha,
+            text_target_contrast = text_target_contrast,
         )

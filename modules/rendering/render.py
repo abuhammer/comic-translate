@@ -13,6 +13,7 @@ from ..detection.utils.bubbles import make_bubble_mask, bubble_interior_bounds
 from ..utils.textblock import adjust_blks_size
 from modules.detection.utils.geometry import shrink_bbox
 from .adaptive_color import TextColorClassifier, determine_text_outline_colors
+from .dynamic_bubble import compute_dynamic_bubble_style
 
 from dataclasses import dataclass
 
@@ -45,6 +46,15 @@ class TextRenderingSettings:
     line_spacing: str
     direction: Qt.LayoutDirection
     auto_font_color: bool = True
+    bubble_mode: str = "auto"
+    bubble_rgb: Tuple[int, int, int] = (35, 100, 160)
+    bubble_min_alpha: int = 110
+    bubble_max_alpha: int = 205
+    bubble_plain_hi: float = 0.88
+    bubble_plain_lo: float = 0.12
+    bubble_flat_var: float = 8e-4
+    bubble_plain_alpha: int = 230
+    text_target_contrast: float = 4.5
 
 def array_to_pil(rgb_image: np.ndarray):
     # Image is already in RGB format, just convert to PIL
@@ -334,6 +344,20 @@ def manual_wrap(
     init_font_size = render_settings.max_font_size
     min_font_size = render_settings.min_font_size
 
+    bubble_mode = getattr(render_settings, "bubble_mode", "auto")
+    bubble_rgb = getattr(render_settings, "bubble_rgb", (35, 100, 160))
+    if isinstance(bubble_rgb, (list, tuple)):
+        bubble_rgb = tuple(int(v) for v in bubble_rgb[:3])
+    else:
+        bubble_rgb = (35, 100, 160)
+    bubble_min_alpha = int(getattr(render_settings, "bubble_min_alpha", 110))
+    bubble_max_alpha = int(getattr(render_settings, "bubble_max_alpha", 205))
+    bubble_plain_hi = float(getattr(render_settings, "bubble_plain_hi", 0.88))
+    bubble_plain_lo = float(getattr(render_settings, "bubble_plain_lo", 0.12))
+    bubble_flat_var = float(getattr(render_settings, "bubble_flat_var", 8e-4))
+    bubble_plain_alpha = int(getattr(render_settings, "bubble_plain_alpha", 230))
+    text_target_contrast = float(getattr(render_settings, "text_target_contrast", 4.5))
+
     for blk in blk_list:
         x1, y1, width, height = blk.xywh
 
@@ -341,20 +365,58 @@ def manual_wrap(
         if not translation or len(translation) == 1:
             continue
 
-        decision = None
-        if auto_font_color and classifier and background_image is not None:
-            try:
-                decision = determine_text_outline_colors(background_image, blk, classifier)
-            except Exception:
-                decision = None
+        blk.bubble_style = None
+        blk.outline_width = float(getattr(blk, "outline_width", outline_width))
 
-        if decision:
-            blk.font_color = decision.text_hex
-            blk.outline_color = decision.outline_hex
+        bubble_style_obj = None
+        if (
+            auto_font_color
+            and background_image is not None
+            and (
+                getattr(blk, "text_class", "") == "text_bubble"
+                or getattr(blk, "bubble_xyxy", None) is not None
+            )
+        ):
+            try:
+                bubble_style_obj = compute_dynamic_bubble_style(
+                    background_image,
+                    blk,
+                    bubble_rgb=bubble_rgb,
+                    min_alpha=bubble_min_alpha,
+                    max_alpha=bubble_max_alpha,
+                    text_min_contrast=text_target_contrast,
+                    bubble_mode=bubble_mode,
+                    plain_alpha=bubble_plain_alpha,
+                    plain_thresh_hi=bubble_plain_hi,
+                    plain_thresh_lo=bubble_plain_lo,
+                    flat_var=bubble_flat_var,
+                )
+            except Exception:
+                bubble_style_obj = None
+
+        decision = None
+        if bubble_style_obj:
+            bubble_style = bubble_style_obj.to_dict()
+            blk.bubble_style = bubble_style
+            text_rgb = bubble_style_obj.text_rgb
+            outline_rgb = bubble_style_obj.outline_rgb
+            blk.font_color = f"#{text_rgb[0]:02X}{text_rgb[1]:02X}{text_rgb[2]:02X}"
+            blk.outline_color = f"#{outline_rgb[0]:02X}{outline_rgb[1]:02X}{outline_rgb[2]:02X}"
+            blk.outline_width = bubble_style_obj.outline_width
         else:
-            blk.font_color = blk.font_color or default_text_color
-            if not getattr(blk, 'outline_color', ''):
-                blk.outline_color = default_outline_color if render_settings.outline else ''
+            if auto_font_color and classifier and background_image is not None:
+                try:
+                    decision = determine_text_outline_colors(background_image, blk, classifier)
+                except Exception:
+                    decision = None
+
+            if decision:
+                blk.font_color = decision.text_hex
+                blk.outline_color = decision.outline_hex
+            else:
+                blk.font_color = blk.font_color or default_text_color
+                if not getattr(blk, 'outline_color', ''):
+                    blk.outline_color = default_outline_color if render_settings.outline else ''
 
         translation, font_size = pyside_word_wrap(translation, font_family, width, height,
                                                  line_spacing, outline_width, bold, italic, underline,

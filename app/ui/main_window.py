@@ -319,6 +319,15 @@ class ComicTranslateUI(QtWidgets.QMainWindow):
         self.hbutton_group.set_button_list(button_config_list)
         self.hbutton_group.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
+        self.bubble_mode_combo = MComboBox().small()
+        self.bubble_mode_combo.setToolTip(self.tr("Bubble Mode"))
+        self.bubble_mode_combo.addItem(self.tr("Auto"), "auto")
+        self.bubble_mode_combo.addItem(self.tr("Plain"), "plain")
+        self.bubble_mode_combo.addItem(self.tr("Translucent"), "translucent")
+        self.bubble_mode_combo.setCurrentIndex(0)
+        self.bubble_mode_combo.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.bubble_mode_combo.setFixedWidth(130)
+
         # Add progress bar
         self.progress_bar = MProgressBar().auto_color()
         self.progress_bar.setValue(0)
@@ -352,6 +361,7 @@ class ComicTranslateUI(QtWidgets.QMainWindow):
 
         header_layout.addWidget(self.undo_tool_group)
         header_layout.addWidget(self.hbutton_group)
+        header_layout.addWidget(self.bubble_mode_combo)
         header_layout.addWidget(self.loading)
         header_layout.addStretch()
         header_layout.addWidget(self.webtoon_toggle)

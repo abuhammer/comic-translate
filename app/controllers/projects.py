@@ -232,6 +232,19 @@ class ProjectController:
 
         self.process_group('text_rendering', self.main.render_settings(), settings)
 
+        settings.beginGroup('text_rendering')
+        bubble_cfg = getattr(self.main, 'bubble_style_config', {})
+        settings.setValue('bubble_mode', bubble_cfg.get('bubble_mode', 'auto'))
+        settings.setValue('bubble_rgb', list(bubble_cfg.get('bubble_rgb', (35, 100, 160))))
+        settings.setValue('bubble_min_alpha', int(bubble_cfg.get('bubble_min_alpha', 110)))
+        settings.setValue('bubble_max_alpha', int(bubble_cfg.get('bubble_max_alpha', 205)))
+        settings.setValue('bubble_plain_hi', float(bubble_cfg.get('bubble_plain_hi', 0.88)))
+        settings.setValue('bubble_plain_lo', float(bubble_cfg.get('bubble_plain_lo', 0.12)))
+        settings.setValue('bubble_flat_var', float(bubble_cfg.get('bubble_flat_var', 8e-4)))
+        settings.setValue('bubble_plain_alpha', int(bubble_cfg.get('bubble_plain_alpha', 230)))
+        settings.setValue('text_target_contrast', float(bubble_cfg.get('text_target_contrast', 4.5)))
+        settings.endGroup()
+
         settings.beginGroup("main_page")
         # Save languages in English
         settings.setValue("source_language", self.main.lang_mapping[self.main.s_combo.currentText()])
@@ -315,6 +328,61 @@ class ProjectController:
         self.main.bold_button.setChecked(settings.value('bold', False, type=bool))
         self.main.italic_button.setChecked(settings.value('italic', False, type=bool))
         self.main.underline_button.setChecked(settings.value('underline', False, type=bool))
+
+        bubble_mode = str(settings.value('bubble_mode', 'auto')).lower()
+        if bubble_mode not in {'auto', 'plain', 'translucent'}:
+            bubble_mode = 'auto'
+        raw_rgb = settings.value('bubble_rgb', [35, 100, 160])
+        if isinstance(raw_rgb, str):
+            stripped = raw_rgb.strip().lstrip('[').lstrip('(').rstrip(']').rstrip(')')
+            if stripped.startswith('#') and len(stripped) in (7, 4):
+                try:
+                    hex_value = stripped[1:]
+                    if len(hex_value) == 3:
+                        hex_value = ''.join(ch * 2 for ch in hex_value)
+                    raw_rgb = [int(hex_value[i:i+2], 16) for i in range(0, 6, 2)]
+                except ValueError:
+                    raw_rgb = [35, 100, 160]
+            else:
+                parts = [p.strip() for p in stripped.split(',') if p.strip()]
+                try:
+                    raw_rgb = [int(float(p)) for p in parts[:3]]
+                except ValueError:
+                    raw_rgb = [35, 100, 160]
+        if isinstance(raw_rgb, (list, tuple)):
+            bubble_rgb = tuple(int(v) for v in (list(raw_rgb) + [35, 100, 160])[:3])
+        else:
+            bubble_rgb = (35, 100, 160)
+
+        bubble_min_alpha = int(settings.value('bubble_min_alpha', 110, type=int))
+        bubble_max_alpha = int(settings.value('bubble_max_alpha', 205, type=int))
+        bubble_plain_hi = float(settings.value('bubble_plain_hi', 0.88))
+        bubble_plain_lo = float(settings.value('bubble_plain_lo', 0.12))
+        bubble_flat_var = float(settings.value('bubble_flat_var', 8e-4))
+        bubble_plain_alpha = int(settings.value('bubble_plain_alpha', 230, type=int))
+        text_target_contrast = float(settings.value('text_target_contrast', 4.5))
+
+        combo = getattr(self.main, 'bubble_mode_combo', None)
+        if combo is not None:
+            idx = combo.findData(bubble_mode)
+            if idx < 0:
+                idx = combo.findData('auto')
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+
+        self.main.bubble_style_config.update(
+            {
+                'bubble_mode': bubble_mode,
+                'bubble_rgb': bubble_rgb,
+                'bubble_min_alpha': bubble_min_alpha,
+                'bubble_max_alpha': bubble_max_alpha,
+                'bubble_plain_hi': bubble_plain_hi,
+                'bubble_plain_lo': bubble_plain_lo,
+                'bubble_flat_var': bubble_flat_var,
+                'bubble_plain_alpha': bubble_plain_alpha,
+                'text_target_contrast': text_target_contrast,
+            }
+        )
         settings.endGroup()
 
     def process_group(self, group_key, group_value, settings_obj: QSettings):

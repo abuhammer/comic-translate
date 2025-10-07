@@ -90,6 +90,18 @@ class ComicTranslate(ComicTranslateUI):
         self.text_ctrl = TextController(self)
         self.webtoon_ctrl = WebtoonController(self)
 
+        self.bubble_style_config = {
+            'bubble_mode': 'auto',
+            'bubble_rgb': (35, 100, 160),
+            'bubble_min_alpha': 110,
+            'bubble_max_alpha': 205,
+            'bubble_plain_hi': 0.88,
+            'bubble_plain_lo': 0.12,
+            'bubble_flat_var': 8e-4,
+            'bubble_plain_alpha': 230,
+            'text_target_contrast': 4.5,
+        }
+
         self.image_skipped.connect(self.image_ctrl.on_image_skipped)
         self.image_processed.connect(self.image_ctrl.on_image_processed)
         self.patches_processed.connect(self.image_ctrl.on_inpaint_patches_processed)

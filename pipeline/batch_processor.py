@@ -342,6 +342,20 @@ class BatchProcessor:
                 else image
             )
 
+            bubble_mode = getattr(render_settings, 'bubble_mode', 'auto')
+            bubble_rgb = getattr(render_settings, 'bubble_rgb', (35, 100, 160))
+            if isinstance(bubble_rgb, (list, tuple)):
+                bubble_rgb = tuple(int(v) for v in bubble_rgb[:3])
+            else:
+                bubble_rgb = (35, 100, 160)
+            bubble_min_alpha = int(getattr(render_settings, 'bubble_min_alpha', 110))
+            bubble_max_alpha = int(getattr(render_settings, 'bubble_max_alpha', 205))
+            bubble_plain_hi = float(getattr(render_settings, 'bubble_plain_hi', 0.88))
+            bubble_plain_lo = float(getattr(render_settings, 'bubble_plain_lo', 0.12))
+            bubble_flat_var = float(getattr(render_settings, 'bubble_flat_var', 8e-4))
+            bubble_plain_alpha = int(getattr(render_settings, 'bubble_plain_alpha', 230))
+            text_target_contrast = float(getattr(render_settings, 'text_target_contrast', 4.5))
+
             text_items_state = []
             for blk in blk_list:
                 x1, y1, width, height = blk.xywh
@@ -367,7 +381,19 @@ class BatchProcessor:
                     )
                 ):
                     try:
-                        bubble_style_obj = compute_dynamic_bubble_style(background_for_sampling, blk)
+                        bubble_style_obj = compute_dynamic_bubble_style(
+                            background_for_sampling,
+                            blk,
+                            bubble_rgb=bubble_rgb,
+                            min_alpha=bubble_min_alpha,
+                            max_alpha=bubble_max_alpha,
+                            text_min_contrast=text_target_contrast,
+                            bubble_mode=bubble_mode,
+                            plain_alpha=bubble_plain_alpha,
+                            plain_thresh_hi=bubble_plain_hi,
+                            plain_thresh_lo=bubble_plain_lo,
+                            flat_var=bubble_flat_var,
+                        )
                     except Exception:
                         logger.exception("Dynamic bubble styling failed for block")
                         bubble_style_obj = None
