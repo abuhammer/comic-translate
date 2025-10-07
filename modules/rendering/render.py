@@ -369,14 +369,7 @@ def manual_wrap(
         blk.outline_width = float(getattr(blk, "outline_width", outline_width))
 
         bubble_style_obj = None
-        if (
-            auto_font_color
-            and background_image is not None
-            and (
-                getattr(blk, "text_class", "") == "text_bubble"
-                or getattr(blk, "bubble_xyxy", None) is not None
-            )
-        ):
+        if auto_font_color and background_image is not None:
             try:
                 bubble_style_obj = compute_dynamic_bubble_style(
                     background_image,
