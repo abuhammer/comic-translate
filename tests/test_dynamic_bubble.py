@@ -58,3 +58,22 @@ def test_gradient_arguments_generate_fill_gradient():
     assert style.fill_gradient['angle'] == 45.0
     assert tuple(style.fill_gradient['start_rgba'][:3]) == (30, 90, 150)
     assert style.fill_gradient['start_rgba'][3] == style.fill_rgba[3]
+
+
+def test_numpy_bbox_and_text_alpha_override():
+    image = np.full((150, 150, 3), 180, dtype=np.uint8)
+    text_bbox = np.array([20.0, 30.0, 120.0, 110.0], dtype=np.float32)
+    bubble_bbox = np.array([18.0, 28.0, 122.0, 112.0], dtype=np.float32)
+    blk = TextBlock(text_bbox=text_bbox, bubble_bbox=bubble_bbox)
+
+    style = compute_dynamic_bubble_style(
+        image,
+        blk,
+        bubble_mode="auto",
+        text_alpha=128,
+    )
+
+    assert style is not None
+    assert style.text_alpha == 128
+    # Ensure the style remains translucent rather than dropping the bubble entirely.
+    assert style.fill_rgba[3] > 0

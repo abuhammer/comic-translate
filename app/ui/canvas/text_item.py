@@ -58,7 +58,13 @@ class TextBlockItem(QGraphicsTextItem):
              bubble_style=None):
 
         super().__init__(text)
+        if not isinstance(render_color, QColor):
+            render_color = QColor(render_color) if render_color else QColor(0, 0, 0, 255)
+        if not render_color.isValid():
+            render_color = QColor(0, 0, 0, 255)
+
         self.text_color = render_color
+        self.text_alpha = render_color.alpha()
         self.outline = True if outline_color else False
         self.outline_color = outline_color
         self.outline_width = outline_width
@@ -108,6 +114,10 @@ class TextBlockItem(QGraphicsTextItem):
         if bubble_style is None:
             if self.bubble_style is not None:
                 self.bubble_style = None
+                if isinstance(self.text_color, QColor):
+                    self.text_alpha = self.text_color.alpha()
+                else:
+                    self.text_alpha = 255
                 self.update()
             return
 
@@ -141,6 +151,16 @@ class TextBlockItem(QGraphicsTextItem):
                 normalised[key] = int(value)
             else:
                 normalised[key] = value
+
+        if 'text_alpha' in normalised:
+            try:
+                self.text_alpha = int(normalised['text_alpha'])
+            except Exception:
+                self.text_alpha = 255
+        elif isinstance(self.text_color, QColor):
+            self.text_alpha = self.text_color.alpha()
+        else:
+            self.text_alpha = 255
 
         if 'padding' not in normalised or normalised['padding'] is None:
             normalised['padding'] = (12.0, 8.0, 12.0, 8.0)
@@ -304,6 +324,12 @@ class TextBlockItem(QGraphicsTextItem):
         cursor.mergeBlockFormat(block_format)
 
     def set_color(self, color):
+        if not isinstance(color, QColor):
+            color = QColor(color) if color else QColor(0, 0, 0, 255)
+        if not color.isValid():
+            color = QColor(0, 0, 0, 255)
+
+        self.text_alpha = color.alpha()
         if not self.textCursor().hasSelection():
             self.text_color = color
         self.update_text_format('color', color)
@@ -398,11 +424,15 @@ class TextBlockItem(QGraphicsTextItem):
 
         self._draw_bubble(painter)
 
+        text_opacity = getattr(self, 'text_alpha', 255) / 255.0
+        text_opacity = max(0.0, min(1.0, float(text_opacity)))
+
         # Then handle any selection outlines
         if self.selection_outlines:
             doc = self.document().clone()
             painter.save()
-            
+            painter.setOpacity(text_opacity)
+
             # Clear the document first to only show outlined parts
             cursor = QTextCursor(doc)
             cursor.select(QTextCursor.SelectionType.Document)
@@ -419,12 +449,12 @@ class TextBlockItem(QGraphicsTextItem):
                 cursor.mergeCharFormat(fmt)
 
                 # Draw the outline for this selection
-                offsets = [(dx, dy) 
+                offsets = [(dx, dy)
                     for dx in (-outline_info.width, 0, outline_info.width)
                     for dy in (-outline_info.width, 0, outline_info.width)
                     if dx != 0 or dy != 0
                 ]
-                
+
                 for dx, dy in offsets:
                     painter.save()
                     painter.translate(dx, dy)
@@ -434,7 +464,10 @@ class TextBlockItem(QGraphicsTextItem):
             painter.restore()
 
         # Draw the normal text on top
+        painter.save()
+        painter.setOpacity(text_opacity)
         super().paint(painter, option, widget)
+        painter.restore()
 
     def _draw_bubble(self, painter: QPainter):
         if not self.bubble_style:
