@@ -21,6 +21,7 @@ def test_plain_white_background_forces_black_text_and_stroke():
     # Auto stroke should kick in with ~60% opacity on the opposite colour.
     assert style.outline_rgb == (255, 255, 255)
     assert 140 <= style.outline_alpha <= 160
+    assert style.outline_width >= 1.5
     assert style.reason.startswith("plain_white_bg")
 
 
@@ -35,6 +36,7 @@ def test_plain_black_background_forces_white_text_and_stroke():
     assert style.text_rgb == (255, 255, 255)
     assert style.outline_rgb == (0, 0, 0)
     assert 140 <= style.outline_alpha <= 160
+    assert style.outline_width >= 1.5
     assert style.reason.startswith("plain_black_bg")
 
 
@@ -49,9 +51,28 @@ def test_dynamic_background_selects_high_contrast_text():
     assert style is not None
     assert style.fill_rgba[3] == 0
     assert style.text_rgb in {(0, 0, 0), (255, 255, 255)}
-    assert "dynamic" in style.reason
+    assert style.reason.startswith("dynamic")
     # Contrast should meet or exceed the WCAG target of 4.5:1
     assert style.outline_alpha in (0, 153)
+
+
+def test_custom_colour_with_auto_contrast_adds_outline():
+    image = np.full((160, 160, 3), 180, dtype=np.uint8)
+    blk = _make_block()
+
+    style = compute_dynamic_bubble_style(
+        image,
+        blk,
+        text_color_mode="custom",
+        custom_text_rgb=(170, 170, 170),
+        auto_contrast=True,
+    )
+
+    assert style is not None
+    assert style.text_rgb == (170, 170, 170)
+    assert style.outline_alpha >= 140
+    assert style.outline_width >= 1.5
+    assert "needs_outline" in style.reason
 
 
 def test_text_opacity_override_applied():
@@ -93,3 +114,4 @@ def test_auto_background_box_adds_tint_when_contrast_low():
     assert style is not None
     assert style.fill_rgba[3] > 0
     assert style.fill_rgba[:3] == (35, 100, 160)
+    assert style.fill_rgba[3] <= int(0.3 * 255 + 1)
