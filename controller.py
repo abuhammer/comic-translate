@@ -2,6 +2,7 @@ import os
 import numpy as np
 import shutil
 import tempfile
+from functools import partial
 from typing import Callable, Tuple
 
 from PySide6 import QtCore
@@ -100,6 +101,10 @@ class ComicTranslate(ComicTranslateUI):
             'bubble_flat_var': 8e-4,
             'bubble_plain_alpha': 230,
             'text_target_contrast': 4.5,
+            'bubble_gradient_enabled': False,
+            'bubble_gradient_start': (35, 100, 160),
+            'bubble_gradient_end': (200, 220, 255),
+            'bubble_gradient_angle': 90.0,
         }
 
         self.image_skipped.connect(self.image_ctrl.on_image_skipped)
@@ -221,10 +226,30 @@ class ComicTranslate(ComicTranslateUI):
             self.bubble_color_button.clicked.connect(self.text_ctrl.on_bubble_color_change)
         if getattr(self, 'bubble_min_alpha_spin', None):
             self.bubble_min_alpha_spin.valueChanged.connect(self.text_ctrl.on_bubble_min_alpha_change)
+        if getattr(self, 'bubble_min_alpha_slider', None):
+            self.bubble_min_alpha_slider.valueChanged.connect(self.text_ctrl.on_bubble_min_alpha_change)
         if getattr(self, 'bubble_max_alpha_spin', None):
             self.bubble_max_alpha_spin.valueChanged.connect(self.text_ctrl.on_bubble_max_alpha_change)
+        if getattr(self, 'bubble_max_alpha_slider', None):
+            self.bubble_max_alpha_slider.valueChanged.connect(self.text_ctrl.on_bubble_max_alpha_change)
         if getattr(self, 'bubble_plain_alpha_spin', None):
             self.bubble_plain_alpha_spin.valueChanged.connect(self.text_ctrl.on_bubble_plain_alpha_change)
+        if getattr(self, 'bubble_plain_alpha_slider', None):
+            self.bubble_plain_alpha_slider.valueChanged.connect(self.text_ctrl.on_bubble_plain_alpha_change)
+        if getattr(self, 'bubble_gradient_checkbox', None):
+            self.bubble_gradient_checkbox.stateChanged.connect(self.text_ctrl.on_bubble_gradient_toggled)
+        if getattr(self, 'bubble_gradient_start_button', None):
+            self.bubble_gradient_start_button.clicked.connect(self.text_ctrl.on_bubble_gradient_start_change)
+        if getattr(self, 'bubble_gradient_end_button', None):
+            self.bubble_gradient_end_button.clicked.connect(self.text_ctrl.on_bubble_gradient_end_change)
+        if getattr(self, 'bubble_gradient_angle_spin', None):
+            self.bubble_gradient_angle_spin.valueChanged.connect(
+                partial(self.text_ctrl.on_bubble_gradient_angle_change, source='spin')
+            )
+        if getattr(self, 'bubble_gradient_angle_slider', None):
+            self.bubble_gradient_angle_slider.valueChanged.connect(
+                partial(self.text_ctrl.on_bubble_gradient_angle_change, source='slider')
+            )
 
         # Page List
         self.page_list.currentItemChanged.connect(self.image_ctrl.on_card_selected)

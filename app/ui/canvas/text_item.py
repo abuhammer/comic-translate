@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QGraphicsTextItem, QGraphicsItem, \
      QApplication, QWidget, QStyleOptionGraphicsItem
 from PySide6.QtGui import QFont, QCursor, QColor, \
-     QTextCharFormat, QTextBlockFormat, QTextCursor, QPainter, QPainterPath
+     QTextCharFormat, QTextBlockFormat, QTextCursor, QPainter, QPainterPath, QLinearGradient
 from PySide6.QtCore import Qt, QRectF, Signal, QPointF
 import math, copy
 from dataclasses import dataclass
@@ -123,6 +123,18 @@ class TextBlockItem(QGraphicsTextItem):
                     normalised[key] = tuple(float(v) for v in value)
                 else:
                     normalised[key] = value
+            elif key == 'fill_gradient' and isinstance(value, dict):
+                gradient_norm = {}
+                for gk, gv in value.items():
+                    if gk in {'start_rgba', 'end_rgba'} and isinstance(gv, (list, tuple)):
+                        gradient_norm[gk] = tuple(int(v) for v in gv)
+                    elif gk == 'angle':
+                        gradient_norm[gk] = float(gv)
+                    elif isinstance(gv, (list, tuple)):
+                        gradient_norm[gk] = tuple(gv)
+                    else:
+                        gradient_norm[gk] = gv
+                normalised[key] = gradient_norm
             elif key == 'corner_radius':
                 normalised[key] = float(value)
             else:
@@ -456,7 +468,44 @@ class TextBlockItem(QGraphicsTextItem):
             painter.drawPath(shadow_path)
             painter.restore()
 
-        painter.setBrush(QColor(fill[0], fill[1], fill[2], alpha))
+        brush = None
+        gradient = self.bubble_style.get('fill_gradient')
+        if isinstance(gradient, dict):
+            start_rgba = gradient.get('start_rgba', fill)
+            end_rgba = gradient.get('end_rgba', fill)
+            if start_rgba and end_rgba and len(start_rgba) >= 4 and len(end_rgba) >= 4:
+                try:
+                    start_color = QColor(
+                        int(start_rgba[0]),
+                        int(start_rgba[1]),
+                        int(start_rgba[2]),
+                        int(start_rgba[3]),
+                    )
+                    end_color = QColor(
+                        int(end_rgba[0]),
+                        int(end_rgba[1]),
+                        int(end_rgba[2]),
+                        int(end_rgba[3]),
+                    )
+                    angle = float(gradient.get('angle', 90.0))
+                    radians = math.radians(angle)
+                    center = bubble_rect.center()
+                    length = max(bubble_rect.width(), bubble_rect.height())
+                    dx = math.cos(radians) * length / 2.0
+                    dy = math.sin(radians) * length / 2.0
+                    start_point = center - QPointF(dx, dy)
+                    end_point = center + QPointF(dx, dy)
+                    grad = QLinearGradient(start_point, end_point)
+                    grad.setColorAt(0.0, start_color)
+                    grad.setColorAt(1.0, end_color)
+                    brush = grad
+                except Exception:
+                    brush = None
+
+        if brush is None:
+            brush = QColor(fill[0], fill[1], fill[2], alpha)
+
+        painter.setBrush(brush)
         painter.setPen(Qt.PenStyle.NoPen)
         path = QPainterPath()
         path.addRoundedRect(bubble_rect, corner_radius, corner_radius)

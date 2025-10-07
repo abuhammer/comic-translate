@@ -29,9 +29,10 @@ class BubbleRenderStyle:
     padding: Tuple[float, float, float, float]
     corner_radius: float
     reason: str = ""
+    fill_gradient: Optional[dict] = None
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "fill_rgba": tuple(self.fill_rgba),
             "text_rgb": tuple(self.text_rgb),
             "outline_rgb": tuple(self.outline_rgb),
@@ -42,6 +43,13 @@ class BubbleRenderStyle:
             "corner_radius": float(self.corner_radius),
             "reason": self.reason,
         }
+        if self.fill_gradient:
+            gradient_dict = dict(self.fill_gradient)
+            for key in ("start_rgba", "end_rgba"):
+                if key in gradient_dict and gradient_dict[key] is not None:
+                    gradient_dict[key] = tuple(int(v) for v in gradient_dict[key])
+            data["fill_gradient"] = gradient_dict
+        return data
 
 
 def _ensure_bbox_within_image(
@@ -361,6 +369,10 @@ def compute_dynamic_bubble_style(
     plain_thresh_hi: float = 0.88,
     plain_thresh_lo: float = 0.12,
     flat_var: float = 8e-4,
+    gradient_enabled: bool = False,
+    gradient_start: Optional[Sequence[int]] = None,
+    gradient_end: Optional[Sequence[int]] = None,
+    gradient_angle: float = 90.0,
 ) -> Optional[BubbleRenderStyle]:
     """Compute a dynamic bubble style for a translated text block."""
 
@@ -454,6 +466,26 @@ def compute_dynamic_bubble_style(
             reason,
         )
 
+    fill_gradient = None
+    if gradient_enabled:
+        start_rgb = (
+            tuple(int(v) for v in gradient_start[:3])
+            if isinstance(gradient_start, (list, tuple))
+            else adjusted_rgb_tuple
+        )
+        if isinstance(gradient_end, (list, tuple)):
+            end_rgb = tuple(int(v) for v in gradient_end[:3])
+        else:
+            start_arr = np.array(start_rgb, dtype=np.float32)
+            end_rgb = tuple(int(v) for v in _clip_rgb(start_arr + 35.0))
+        alpha_value = int(fill_rgba[3]) if len(fill_rgba) >= 4 else 255
+        fill_gradient = {
+            "type": "linear",
+            "angle": float(gradient_angle),
+            "start_rgba": (*start_rgb, alpha_value),
+            "end_rgba": (*end_rgb, alpha_value),
+        }
+
     return BubbleRenderStyle(
         fill_rgba=fill_rgba,
         text_rgb=text_rgb,
@@ -464,6 +496,7 @@ def compute_dynamic_bubble_style(
         padding=(pad_l, pad_t, pad_r, pad_b),
         corner_radius=corner_radius,
         reason=reason,
+        fill_gradient=fill_gradient,
     )
 
 

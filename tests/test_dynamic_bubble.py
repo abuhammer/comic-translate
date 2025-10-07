@@ -35,3 +35,24 @@ def test_translucent_mode_keeps_high_opacity():
     assert style.fill_rgba[3] >= 225
     assert style.text_rgb == (255, 255, 255)
     assert style.reason.startswith("dynamic")
+
+
+def test_gradient_arguments_generate_fill_gradient():
+    image = np.full((200, 200, 3), 200, dtype=np.uint8)
+    blk = _make_block()
+
+    style = compute_dynamic_bubble_style(
+        image,
+        blk,
+        bubble_mode="auto",
+        gradient_enabled=True,
+        gradient_start=(30, 90, 150),
+        gradient_end=(220, 240, 255),
+        gradient_angle=45.0,
+    )
+
+    assert style is not None
+    assert style.fill_gradient is not None
+    assert style.fill_gradient['angle'] == 45.0
+    assert tuple(style.fill_gradient['start_rgba'][:3]) == (30, 90, 150)
+    assert style.fill_gradient['start_rgba'][3] == style.fill_rgba[3]

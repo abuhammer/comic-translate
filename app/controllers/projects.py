@@ -9,7 +9,7 @@ import imkit as imk
 
 from PySide6 import QtWidgets
 from PySide6.QtCore import QSettings
-from PySide6.QtGui import QUndoStack
+from PySide6.QtGui import QUndoStack, QColor
 
 from app.ui.canvas.text_item import TextBlockItem
 from app.ui.canvas.text.text_item_properties import TextItemProperties
@@ -243,6 +243,10 @@ class ProjectController:
         settings.setValue('bubble_flat_var', float(bubble_cfg.get('bubble_flat_var', 8e-4)))
         settings.setValue('bubble_plain_alpha', int(bubble_cfg.get('bubble_plain_alpha', 230)))
         settings.setValue('text_target_contrast', float(bubble_cfg.get('text_target_contrast', 4.5)))
+        settings.setValue('bubble_gradient_enabled', bool(bubble_cfg.get('bubble_gradient_enabled', False)))
+        settings.setValue('bubble_gradient_start', list(bubble_cfg.get('bubble_gradient_start', (35, 100, 160))))
+        settings.setValue('bubble_gradient_end', list(bubble_cfg.get('bubble_gradient_end', (200, 220, 255))))
+        settings.setValue('bubble_gradient_angle', float(bubble_cfg.get('bubble_gradient_angle', 90.0)))
         settings.endGroup()
 
         settings.beginGroup("main_page")
@@ -361,6 +365,33 @@ class ProjectController:
         bubble_flat_var = float(settings.value('bubble_flat_var', 8e-4))
         bubble_plain_alpha = int(settings.value('bubble_plain_alpha', 230, type=int))
         text_target_contrast = float(settings.value('text_target_contrast', 4.5))
+        bubble_gradient_enabled = settings.value('bubble_gradient_enabled', False, type=bool)
+
+        def _parse_rgb(value, default):
+            if isinstance(value, str):
+                stripped = value.strip().lstrip('[').lstrip('(').rstrip(']').rstrip(')')
+                if stripped.startswith('#') and len(stripped) in (7, 4):
+                    try:
+                        hex_value = stripped[1:]
+                        if len(hex_value) == 3:
+                            hex_value = ''.join(ch * 2 for ch in hex_value)
+                        return tuple(int(hex_value[i:i+2], 16) for i in range(0, 6, 2))
+                    except ValueError:
+                        return default
+                parts = [p.strip() for p in stripped.split(',') if p.strip()]
+                try:
+                    return tuple(int(float(p)) for p in parts[:3])
+                except ValueError:
+                    return default
+            if isinstance(value, (list, tuple)) and len(value) >= 3:
+                return tuple(int(v) for v in value[:3])
+            return default
+
+        gradient_start_raw = settings.value('bubble_gradient_start', list(bubble_rgb))
+        gradient_start = _parse_rgb(gradient_start_raw, bubble_rgb)
+        gradient_end_raw = settings.value('bubble_gradient_end', list(gradient_start))
+        gradient_end = _parse_rgb(gradient_end_raw, gradient_start)
+        gradient_angle = float(settings.value('bubble_gradient_angle', 90.0))
 
         combo = getattr(self.main, 'bubble_mode_combo', None)
         if combo is not None:
@@ -381,6 +412,10 @@ class ProjectController:
                 'bubble_flat_var': bubble_flat_var,
                 'bubble_plain_alpha': bubble_plain_alpha,
                 'text_target_contrast': text_target_contrast,
+                'bubble_gradient_enabled': bubble_gradient_enabled,
+                'bubble_gradient_start': gradient_start,
+                'bubble_gradient_end': gradient_end,
+                'bubble_gradient_angle': gradient_angle,
             }
         )
 
@@ -399,18 +434,60 @@ class ProjectController:
             min_spin.blockSignals(True)
             min_spin.setValue(bubble_min_alpha)
             min_spin.blockSignals(False)
+        min_slider = getattr(self.main, 'bubble_min_alpha_slider', None)
+        if min_slider is not None:
+            min_slider.blockSignals(True)
+            min_slider.setValue(bubble_min_alpha)
+            min_slider.blockSignals(False)
 
         max_spin = getattr(self.main, 'bubble_max_alpha_spin', None)
         if max_spin is not None:
             max_spin.blockSignals(True)
             max_spin.setValue(bubble_max_alpha)
             max_spin.blockSignals(False)
+        max_slider = getattr(self.main, 'bubble_max_alpha_slider', None)
+        if max_slider is not None:
+            max_slider.blockSignals(True)
+            max_slider.setValue(bubble_max_alpha)
+            max_slider.blockSignals(False)
 
         plain_spin = getattr(self.main, 'bubble_plain_alpha_spin', None)
         if plain_spin is not None:
             plain_spin.blockSignals(True)
             plain_spin.setValue(bubble_plain_alpha)
             plain_spin.blockSignals(False)
+        plain_slider = getattr(self.main, 'bubble_plain_alpha_slider', None)
+        if plain_slider is not None:
+            plain_slider.blockSignals(True)
+            plain_slider.setValue(bubble_plain_alpha)
+            plain_slider.blockSignals(False)
+
+        gradient_checkbox = getattr(self.main, 'bubble_gradient_checkbox', None)
+        if gradient_checkbox is not None:
+            gradient_checkbox.blockSignals(True)
+            gradient_checkbox.setChecked(bubble_gradient_enabled)
+            gradient_checkbox.blockSignals(False)
+        start_button = getattr(self.main, 'bubble_gradient_start_button', None)
+        if start_button is not None:
+            self.main.text_ctrl._update_gradient_color_button(
+                'bubble_gradient_start_button', QColor(*gradient_start)
+            )
+        end_button = getattr(self.main, 'bubble_gradient_end_button', None)
+        if end_button is not None:
+            self.main.text_ctrl._update_gradient_color_button(
+                'bubble_gradient_end_button', QColor(*gradient_end)
+            )
+        angle_spin = getattr(self.main, 'bubble_gradient_angle_spin', None)
+        if angle_spin is not None:
+            angle_spin.blockSignals(True)
+            angle_spin.setValue(int(round(gradient_angle)))
+            angle_spin.blockSignals(False)
+        angle_slider = getattr(self.main, 'bubble_gradient_angle_slider', None)
+        if angle_slider is not None:
+            angle_slider.blockSignals(True)
+            angle_slider.setValue(int(round(gradient_angle)))
+            angle_slider.blockSignals(False)
+        self.main.text_ctrl._set_gradient_controls_enabled(bubble_gradient_enabled)
         settings.endGroup()
 
     def process_group(self, group_key, group_value, settings_obj: QSettings):

@@ -12,6 +12,18 @@ def _normalize_bubble_style(style):
     for key, value in style.items():
         if isinstance(value, list):
             normalised[key] = tuple(value)
+        elif key == 'fill_gradient' and isinstance(value, dict):
+            grad_norm = {}
+            for gk, gv in value.items():
+                if gk in {'start_rgba', 'end_rgba'} and isinstance(gv, (list, tuple)):
+                    grad_norm[gk] = tuple(int(v) for v in gv)
+                elif gk == 'angle':
+                    grad_norm[gk] = float(gv)
+                elif isinstance(gv, list):
+                    grad_norm[gk] = tuple(gv)
+                else:
+                    grad_norm[gk] = gv
+            normalised[key] = grad_norm
         else:
             normalised[key] = value
     return normalised
@@ -149,6 +161,15 @@ class TextItemProperties:
             for key in ('fill_rgba', 'text_rgb', 'outline_rgb', 'shadow_rgba', 'shadow_offset', 'padding'):
                 if key in bubble_style and isinstance(bubble_style[key], tuple):
                     bubble_style[key] = list(bubble_style[key])
+            gradient = bubble_style.get('fill_gradient') if bubble_style else None
+            if isinstance(gradient, dict):
+                gradient_copy = {}
+                for gk, gv in gradient.items():
+                    if isinstance(gv, tuple):
+                        gradient_copy[gk] = list(gv)
+                    else:
+                        gradient_copy[gk] = gv
+                bubble_style['fill_gradient'] = gradient_copy
 
         return {
             'text': self.text,

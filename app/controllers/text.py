@@ -42,8 +42,16 @@ class TextController:
             getattr(self.main, 'bubble_mode_combo', None),
             getattr(self.main, 'bubble_color_button', None),
             getattr(self.main, 'bubble_min_alpha_spin', None),
+            getattr(self.main, 'bubble_min_alpha_slider', None),
             getattr(self.main, 'bubble_max_alpha_spin', None),
+            getattr(self.main, 'bubble_max_alpha_slider', None),
             getattr(self.main, 'bubble_plain_alpha_spin', None),
+            getattr(self.main, 'bubble_plain_alpha_slider', None),
+            getattr(self.main, 'bubble_gradient_checkbox', None),
+            getattr(self.main, 'bubble_gradient_start_button', None),
+            getattr(self.main, 'bubble_gradient_end_button', None),
+            getattr(self.main, 'bubble_gradient_angle_spin', None),
+            getattr(self.main, 'bubble_gradient_angle_slider', None),
         ]
         self.widgets_to_block = [widget for widget in widget_candidates if widget is not None]
 
@@ -63,6 +71,27 @@ class TextController:
         )
         button.setProperty('selected_color', color.name())
         button.update()
+
+    def _update_gradient_color_button(self, button_name: str, color: QColor) -> None:
+        button = getattr(self.main, button_name, None)
+        if button is None or not color.isValid():
+            return
+        button.setStyleSheet(
+            f"background-color: {color.name()}; border: none; border-radius: 5px;"
+        )
+        button.setProperty('selected_color', color.name())
+        button.update()
+
+    def _set_gradient_controls_enabled(self, enabled: bool) -> None:
+        for name in (
+            'bubble_gradient_start_button',
+            'bubble_gradient_end_button',
+            'bubble_gradient_angle_spin',
+            'bubble_gradient_angle_slider',
+        ):
+            widget = getattr(self.main, name, None)
+            if widget is not None:
+                widget.setEnabled(enabled)
 
     @staticmethod
     def _relative_luminance_rgb(rgb: tuple[int, int, int]) -> float:
@@ -111,7 +140,7 @@ class TextController:
 
         shadow_alpha = 120 if text_rgb == (255, 255, 255) else 90
 
-        return {
+        style = {
             'fill_rgba': fill_rgba,
             'text_rgb': text_rgb,
             'outline_rgb': outline_rgb,
@@ -122,6 +151,46 @@ class TextController:
             'corner_radius': 18.0,
             'reason': 'plain_fallback',
         }
+        return self._apply_gradient_to_style(style, render_settings)
+
+    def _apply_gradient_to_style(
+        self, style: Optional[dict], render_settings: TextRenderingSettings
+    ) -> Optional[dict]:
+        if style is None:
+            return None
+
+        cfg = getattr(self.main, 'bubble_style_config', {})
+        enabled = bool(cfg.get('bubble_gradient_enabled', False))
+        if not enabled:
+            if 'fill_gradient' in style:
+                style.pop('fill_gradient', None)
+            return style
+
+        fill = style.get('fill_rgba')
+        alpha = 230
+        if isinstance(fill, (list, tuple)) and len(fill) >= 4:
+            alpha = int(fill[3])
+
+        def _to_rgb(value, default):
+            if isinstance(value, (list, tuple)) and len(value) >= 3:
+                return tuple(int(v) for v in value[:3])
+            return tuple(int(v) for v in default[:3])
+
+        start_rgb = _to_rgb(
+            cfg.get('bubble_gradient_start'), render_settings.bubble_rgb
+        )
+        end_rgb = _to_rgb(
+            cfg.get('bubble_gradient_end'), cfg.get('bubble_gradient_start', render_settings.bubble_rgb)
+        )
+        angle = float(cfg.get('bubble_gradient_angle', 90.0))
+
+        style['fill_gradient'] = {
+            'type': 'linear',
+            'angle': angle,
+            'start_rgba': (*start_rgb, alpha),
+            'end_rgba': (*end_rgb, alpha),
+        }
+        return style
 
     def _apply_style_to_item(self, item: TextBlockItem, blk: TextBlock, style: Optional[dict]) -> None:
         if style is None:
@@ -404,8 +473,16 @@ class TextController:
         color = QColorDialog.getColor(initial_color, self.main, self.main.tr('Bubble Color'))
         if not color.isValid():
             return
+        prev_start = cfg.get('bubble_gradient_start')
+        if isinstance(prev_start, (list, tuple)):
+            prev_start = tuple(int(v) for v in prev_start[:3])
+        else:
+            prev_start = current_rgb
         cfg['bubble_rgb'] = (color.red(), color.green(), color.blue())
         self._update_bubble_color_button(color)
+        if tuple(prev_start) == tuple(current_rgb):
+            cfg['bubble_gradient_start'] = (color.red(), color.green(), color.blue())
+            self._update_gradient_color_button('bubble_gradient_start_button', color)
         self.refresh_bubble_styles(recompute=True)
 
     def on_bubble_min_alpha_change(self, value: int):
@@ -420,6 +497,11 @@ class TextController:
                 spin.blockSignals(True)
                 spin.setValue(value)
                 spin.blockSignals(False)
+        slider = getattr(self.main, 'bubble_min_alpha_slider', None)
+        if slider is not None and slider.value() != value:
+            slider.blockSignals(True)
+            slider.setValue(value)
+            slider.blockSignals(False)
         self.refresh_bubble_styles(recompute=True)
 
     def on_bubble_max_alpha_change(self, value: int):
@@ -442,6 +524,11 @@ class TextController:
                 spin_plain.blockSignals(True)
                 spin_plain.setValue(value)
                 spin_plain.blockSignals(False)
+        slider = getattr(self.main, 'bubble_max_alpha_slider', None)
+        if slider is not None and slider.value() != value:
+            slider.blockSignals(True)
+            slider.setValue(value)
+            slider.blockSignals(False)
         self.refresh_bubble_styles(recompute=True)
 
     def on_bubble_plain_alpha_change(self, value: int):
@@ -456,6 +543,66 @@ class TextController:
                 spin.blockSignals(True)
                 spin.setValue(value)
                 spin.blockSignals(False)
+        slider = getattr(self.main, 'bubble_plain_alpha_slider', None)
+        if slider is not None and slider.value() != value:
+            slider.blockSignals(True)
+            slider.setValue(value)
+            slider.blockSignals(False)
+        self.refresh_bubble_styles(recompute=True)
+
+    def on_bubble_gradient_toggled(self, state: int):
+        cfg = getattr(self.main, 'bubble_style_config', {})
+        enabled = bool(state)
+        cfg['bubble_gradient_enabled'] = enabled
+        self._set_gradient_controls_enabled(enabled)
+        self.refresh_bubble_styles(recompute=True)
+
+    def on_bubble_gradient_start_change(self):
+        cfg = getattr(self.main, 'bubble_style_config', {})
+        current = cfg.get('bubble_gradient_start', cfg.get('bubble_rgb', (35, 100, 160)))
+        if isinstance(current, (list, tuple)):
+            current = tuple(int(v) for v in current[:3])
+        else:
+            current = (35, 100, 160)
+        color = QColorDialog.getColor(
+            QColor(*current), self.main, self.main.tr('Gradient Start Color')
+        )
+        if not color.isValid():
+            return
+        cfg['bubble_gradient_start'] = (color.red(), color.green(), color.blue())
+        self._update_gradient_color_button('bubble_gradient_start_button', color)
+        self.refresh_bubble_styles(recompute=True)
+
+    def on_bubble_gradient_end_change(self):
+        cfg = getattr(self.main, 'bubble_style_config', {})
+        current = cfg.get('bubble_gradient_end', cfg.get('bubble_gradient_start', cfg.get('bubble_rgb', (35, 100, 160))))
+        if isinstance(current, (list, tuple)):
+            current = tuple(int(v) for v in current[:3])
+        else:
+            current = (200, 220, 255)
+        color = QColorDialog.getColor(
+            QColor(*current), self.main, self.main.tr('Gradient End Color')
+        )
+        if not color.isValid():
+            return
+        cfg['bubble_gradient_end'] = (color.red(), color.green(), color.blue())
+        self._update_gradient_color_button('bubble_gradient_end_button', color)
+        self.refresh_bubble_styles(recompute=True)
+
+    def on_bubble_gradient_angle_change(self, value: int, source: str = ''):
+        cfg = getattr(self.main, 'bubble_style_config', {})
+        value = int(value)
+        cfg['bubble_gradient_angle'] = float(value)
+        spin = getattr(self.main, 'bubble_gradient_angle_spin', None)
+        slider = getattr(self.main, 'bubble_gradient_angle_slider', None)
+        if source != 'spin' and spin is not None and spin.value() != value:
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
+        if source != 'slider' and slider is not None and slider.value() != value:
+            slider.blockSignals(True)
+            slider.setValue(value)
+            slider.blockSignals(False)
         self.refresh_bubble_styles(recompute=True)
 
     def refresh_bubble_styles(self, recompute: bool = False) -> None:
@@ -508,6 +655,7 @@ class TextController:
                 blk.outline_color = '#{0:02X}{1:02X}{2:02X}'.format(*style_dict['outline_rgb'])
                 blk.outline_width = float(style_dict.get('outline_width', getattr(blk, 'outline_width', 2.0)))
 
+            style_dict = self._apply_gradient_to_style(style_dict, render_settings)
             self._apply_style_to_item(item, blk, style_dict)
 
     # Formatting actions
@@ -863,6 +1011,17 @@ class TextController:
         bubble_flat_var = float(bubble_config.get('bubble_flat_var', 8e-4))
         bubble_plain_alpha = int(bubble_config.get('bubble_plain_alpha', 230))
         text_target_contrast = float(bubble_config.get('text_target_contrast', 4.5))
+        gradient_enabled = bool(bubble_config.get('bubble_gradient_enabled', False))
+
+        def _rgb_tuple(key, default):
+            value = bubble_config.get(key, default)
+            if isinstance(value, (list, tuple)):
+                return tuple(int(v) for v in value[:3])
+            return default
+
+        gradient_start = _rgb_tuple('bubble_gradient_start', bubble_rgb)
+        gradient_end = _rgb_tuple('bubble_gradient_end', gradient_start)
+        gradient_angle = float(bubble_config.get('bubble_gradient_angle', 90.0))
 
         # Keep the configuration in sync so project saves persist overrides
         self.main.bubble_style_config.update(
@@ -876,8 +1035,13 @@ class TextController:
                 'bubble_flat_var': bubble_flat_var,
                 'bubble_plain_alpha': bubble_plain_alpha,
                 'text_target_contrast': text_target_contrast,
+                'bubble_gradient_enabled': gradient_enabled,
+                'bubble_gradient_start': gradient_start,
+                'bubble_gradient_end': gradient_end,
+                'bubble_gradient_angle': gradient_angle,
             }
         )
+        self._set_gradient_controls_enabled(gradient_enabled)
 
         return TextRenderingSettings(
             alignment_id = self.main.alignment_tool_group.get_dayu_checked(),
@@ -903,4 +1067,8 @@ class TextController:
             bubble_flat_var = bubble_flat_var,
             bubble_plain_alpha = bubble_plain_alpha,
             text_target_contrast = text_target_contrast,
+            bubble_gradient_enabled = gradient_enabled,
+            bubble_gradient_start = gradient_start,
+            bubble_gradient_end = gradient_end,
+            bubble_gradient_angle = gradient_angle,
         )

@@ -788,6 +788,26 @@ class WebtoonBatchProcessor:
         bubble_flat_var = float(getattr(render_settings, 'bubble_flat_var', 8e-4))
         bubble_plain_alpha = int(getattr(render_settings, 'bubble_plain_alpha', 230))
         text_target_contrast = float(getattr(render_settings, 'text_target_contrast', 4.5))
+        bubble_gradient_enabled = bool(
+            getattr(render_settings, 'bubble_gradient_enabled', False)
+        )
+        bubble_gradient_start = getattr(
+            render_settings, 'bubble_gradient_start', bubble_rgb
+        )
+        if isinstance(bubble_gradient_start, (list, tuple)):
+            bubble_gradient_start = tuple(int(v) for v in bubble_gradient_start[:3])
+        else:
+            bubble_gradient_start = bubble_rgb
+        bubble_gradient_end = getattr(
+            render_settings, 'bubble_gradient_end', bubble_gradient_start
+        )
+        if isinstance(bubble_gradient_end, (list, tuple)):
+            bubble_gradient_end = tuple(int(v) for v in bubble_gradient_end[:3])
+        else:
+            bubble_gradient_end = bubble_gradient_start
+        bubble_gradient_angle = float(
+            getattr(render_settings, 'bubble_gradient_angle', 90.0)
+        )
 
         backgrounds = self.virtual_page_backgrounds.get(vpage.virtual_id, [])
         background_image = None
@@ -841,11 +861,15 @@ class WebtoonBatchProcessor:
                         max_alpha=bubble_max_alpha,
                         text_min_contrast=text_target_contrast,
                         bubble_mode=bubble_mode,
-                        plain_alpha=bubble_plain_alpha,
-                        plain_thresh_hi=bubble_plain_hi,
-                        plain_thresh_lo=bubble_plain_lo,
-                        flat_var=bubble_flat_var,
-                    )
+                            plain_alpha=bubble_plain_alpha,
+                            plain_thresh_hi=bubble_plain_hi,
+                            plain_thresh_lo=bubble_plain_lo,
+                            flat_var=bubble_flat_var,
+                            gradient_enabled=bubble_gradient_enabled,
+                            gradient_start=bubble_gradient_start,
+                            gradient_end=bubble_gradient_end,
+                            gradient_angle=bubble_gradient_angle,
+                        )
                 except Exception:
                     logger.exception("Dynamic bubble styling failed for virtual page %s", vpage.virtual_id)
                     bubble_style_obj = None

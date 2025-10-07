@@ -55,6 +55,10 @@ class TextRenderingSettings:
     bubble_flat_var: float = 8e-4
     bubble_plain_alpha: int = 230
     text_target_contrast: float = 4.5
+    bubble_gradient_enabled: bool = False
+    bubble_gradient_start: Tuple[int, int, int] = (35, 100, 160)
+    bubble_gradient_end: Tuple[int, int, int] = (200, 220, 255)
+    bubble_gradient_angle: float = 90.0
 
 def array_to_pil(rgb_image: np.ndarray):
     # Image is already in RGB format, just convert to PIL
@@ -357,6 +361,24 @@ def manual_wrap(
     bubble_flat_var = float(getattr(render_settings, "bubble_flat_var", 8e-4))
     bubble_plain_alpha = int(getattr(render_settings, "bubble_plain_alpha", 230))
     text_target_contrast = float(getattr(render_settings, "text_target_contrast", 4.5))
+    bubble_gradient_enabled = bool(
+        getattr(render_settings, "bubble_gradient_enabled", False)
+    )
+    bubble_gradient_start = getattr(
+        render_settings, "bubble_gradient_start", bubble_rgb
+    )
+    if isinstance(bubble_gradient_start, (list, tuple)):
+        bubble_gradient_start = tuple(int(v) for v in bubble_gradient_start[:3])
+    else:
+        bubble_gradient_start = bubble_rgb
+    bubble_gradient_end = getattr(render_settings, "bubble_gradient_end", bubble_rgb)
+    if isinstance(bubble_gradient_end, (list, tuple)):
+        bubble_gradient_end = tuple(int(v) for v in bubble_gradient_end[:3])
+    else:
+        bubble_gradient_end = bubble_gradient_start
+    bubble_gradient_angle = float(
+        getattr(render_settings, "bubble_gradient_angle", 90.0)
+    )
 
     for blk in blk_list:
         x1, y1, width, height = blk.xywh
@@ -383,6 +405,10 @@ def manual_wrap(
                     plain_thresh_hi=bubble_plain_hi,
                     plain_thresh_lo=bubble_plain_lo,
                     flat_var=bubble_flat_var,
+                    gradient_enabled=bubble_gradient_enabled,
+                    gradient_start=bubble_gradient_start,
+                    gradient_end=bubble_gradient_end,
+                    gradient_angle=bubble_gradient_angle,
                 )
             except Exception:
                 bubble_style_obj = None

@@ -554,25 +554,91 @@ class ComicTranslateUI(QtWidgets.QMainWindow):
         self.bubble_min_alpha_spin = MSpinBox().small()
         self.bubble_min_alpha_spin.setRange(0, 255)
         self.bubble_min_alpha_spin.setValue(int(bubble_cfg.get('bubble_min_alpha', 110)))
+        self.bubble_min_alpha_slider = MSlider()
+        self.bubble_min_alpha_slider.setRange(0, 255)
+        self.bubble_min_alpha_slider.setValue(self.bubble_min_alpha_spin.value())
+        self.bubble_min_alpha_slider.setToolTip(self.tr('Minimum bubble opacity'))
 
         bubble_max_alpha_label = QtWidgets.QLabel(self.tr('Max Alpha'))
         self.bubble_max_alpha_spin = MSpinBox().small()
         self.bubble_max_alpha_spin.setRange(0, 255)
         self.bubble_max_alpha_spin.setValue(int(bubble_cfg.get('bubble_max_alpha', 205)))
+        self.bubble_max_alpha_slider = MSlider()
+        self.bubble_max_alpha_slider.setRange(0, 255)
+        self.bubble_max_alpha_slider.setValue(self.bubble_max_alpha_spin.value())
+        self.bubble_max_alpha_slider.setToolTip(self.tr('Maximum bubble opacity'))
 
         bubble_plain_alpha_label = QtWidgets.QLabel(self.tr('Plain Alpha'))
         self.bubble_plain_alpha_spin = MSpinBox().small()
         self.bubble_plain_alpha_spin.setRange(0, 255)
         self.bubble_plain_alpha_spin.setValue(int(bubble_cfg.get('bubble_plain_alpha', 230)))
+        self.bubble_plain_alpha_slider = MSlider()
+        self.bubble_plain_alpha_slider.setRange(0, 255)
+        self.bubble_plain_alpha_slider.setValue(self.bubble_plain_alpha_spin.value())
+        self.bubble_plain_alpha_slider.setToolTip(self.tr('Plain bubble opacity'))
+
+        gradient_enabled = bool(bubble_cfg.get('bubble_gradient_enabled', False))
+        gradient_start_rgb = tuple(int(v) for v in bubble_cfg.get('bubble_gradient_start', bubble_rgb))
+        gradient_end_rgb = tuple(int(v) for v in bubble_cfg.get('bubble_gradient_end', gradient_start_rgb))
+        gradient_angle = int(float(bubble_cfg.get('bubble_gradient_angle', 90.0)))
+
+        self.bubble_gradient_checkbox = MCheckBox(self.tr('Gradient Fill'))
+        self.bubble_gradient_checkbox.setChecked(gradient_enabled)
+
+        gradient_start_label = QtWidgets.QLabel(self.tr('Start'))
+        self.bubble_gradient_start_button = QtWidgets.QPushButton()
+        self.bubble_gradient_start_button.setFixedSize(30, 30)
+        start_hex = '#{0:02X}{1:02X}{2:02X}'.format(*gradient_start_rgb)
+        self.bubble_gradient_start_button.setStyleSheet(
+            f"background-color: {start_hex}; border: none; border-radius: 5px;"
+        )
+        self.bubble_gradient_start_button.setProperty('selected_color', start_hex)
+
+        gradient_end_label = QtWidgets.QLabel(self.tr('End'))
+        self.bubble_gradient_end_button = QtWidgets.QPushButton()
+        self.bubble_gradient_end_button.setFixedSize(30, 30)
+        end_hex = '#{0:02X}{1:02X}{2:02X}'.format(*gradient_end_rgb)
+        self.bubble_gradient_end_button.setStyleSheet(
+            f"background-color: {end_hex}; border: none; border-radius: 5px;"
+        )
+        self.bubble_gradient_end_button.setProperty('selected_color', end_hex)
+
+        gradient_angle_label = QtWidgets.QLabel(self.tr('Angle'))
+        self.bubble_gradient_angle_spin = MSpinBox().small()
+        self.bubble_gradient_angle_spin.setRange(0, 360)
+        self.bubble_gradient_angle_spin.setValue(gradient_angle)
+        self.bubble_gradient_angle_slider = MSlider()
+        self.bubble_gradient_angle_slider.setRange(0, 360)
+        self.bubble_gradient_angle_slider.setValue(gradient_angle)
+        self.bubble_gradient_angle_slider.setToolTip(self.tr('Gradient angle'))
+
+        for widget in (
+            self.bubble_gradient_start_button,
+            self.bubble_gradient_end_button,
+            self.bubble_gradient_angle_spin,
+            self.bubble_gradient_angle_slider,
+        ):
+            widget.setEnabled(gradient_enabled)
 
         bubble_settings_layout.addWidget(bubble_color_label, 0, 0)
         bubble_settings_layout.addWidget(self.bubble_color_button, 0, 1)
         bubble_settings_layout.addWidget(bubble_min_alpha_label, 1, 0)
         bubble_settings_layout.addWidget(self.bubble_min_alpha_spin, 1, 1)
+        bubble_settings_layout.addWidget(self.bubble_min_alpha_slider, 1, 2)
         bubble_settings_layout.addWidget(bubble_max_alpha_label, 2, 0)
         bubble_settings_layout.addWidget(self.bubble_max_alpha_spin, 2, 1)
+        bubble_settings_layout.addWidget(self.bubble_max_alpha_slider, 2, 2)
         bubble_settings_layout.addWidget(bubble_plain_alpha_label, 3, 0)
         bubble_settings_layout.addWidget(self.bubble_plain_alpha_spin, 3, 1)
+        bubble_settings_layout.addWidget(self.bubble_plain_alpha_slider, 3, 2)
+        bubble_settings_layout.addWidget(self.bubble_gradient_checkbox, 4, 0, 1, 3)
+        bubble_settings_layout.addWidget(gradient_start_label, 5, 0)
+        bubble_settings_layout.addWidget(self.bubble_gradient_start_button, 5, 1)
+        bubble_settings_layout.addWidget(gradient_end_label, 6, 0)
+        bubble_settings_layout.addWidget(self.bubble_gradient_end_button, 6, 1)
+        bubble_settings_layout.addWidget(gradient_angle_label, 7, 0)
+        bubble_settings_layout.addWidget(self.bubble_gradient_angle_spin, 7, 1)
+        bubble_settings_layout.addWidget(self.bubble_gradient_angle_slider, 7, 2)
 
         rendering_divider_top = MDivider()
         rendering_divider_bottom = MDivider()
