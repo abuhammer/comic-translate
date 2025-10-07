@@ -92,20 +92,21 @@ class ComicTranslate(ComicTranslateUI):
         self.webtoon_ctrl = WebtoonController(self)
 
         self.bubble_style_config = {
-            'bubble_mode': 'auto',
-            'bubble_rgb': (35, 100, 160),
-            'bubble_min_alpha': 110,
-            'bubble_max_alpha': 205,
-            'bubble_plain_hi': 0.88,
-            'bubble_plain_lo': 0.12,
-            'bubble_flat_var': 8e-4,
-            'bubble_plain_alpha': 230,
+            'text_color_mode': 'auto',
+            'custom_text_rgb': (0, 0, 0),
+            'text_fill_opacity': 1.0,
+            'stroke_enabled': False,
+            'stroke_width': 2.0,
+            'stroke_opacity': 1.0,
+            'auto_contrast': True,
             'text_target_contrast': 4.5,
-            'bubble_text_alpha': 255,
-            'bubble_gradient_enabled': False,
-            'bubble_gradient_start': (35, 100, 160),
-            'bubble_gradient_end': (200, 220, 255),
-            'bubble_gradient_angle': 90.0,
+            'background_box_mode': 'off',
+            'background_box_opacity': 0.25,
+            'bubble_rgb': (35, 100, 160),
+            'background_plain_hi': 0.95,
+            'background_plain_lo': 0.05,
+            'flat_variance_threshold': 4e-4,
+            'auto_stroke_opacity': 0.6,
         }
 
         self.image_skipped.connect(self.image_ctrl.on_image_skipped)
@@ -221,43 +222,45 @@ class ComicTranslate(ComicTranslateUI):
         self.outline_width_dropdown.currentTextChanged.connect(self.text_ctrl.on_outline_width_change)
         self.outline_checkbox.stateChanged.connect(self.text_ctrl.toggle_outline_settings)
 
-        if getattr(self, 'bubble_mode_combo', None):
-            self.bubble_mode_combo.currentIndexChanged.connect(self.text_ctrl.on_bubble_mode_changed)
         if getattr(self, 'bubble_color_button', None):
             self.bubble_color_button.clicked.connect(self.text_ctrl.on_bubble_color_change)
-        if getattr(self, 'bubble_min_alpha_spin', None):
-            self.bubble_min_alpha_spin.valueChanged.connect(self.text_ctrl.on_bubble_min_alpha_change)
-        if getattr(self, 'bubble_min_alpha_slider', None):
-            self.bubble_min_alpha_slider.valueChanged.connect(self.text_ctrl.on_bubble_min_alpha_change)
-        if getattr(self, 'bubble_max_alpha_spin', None):
-            self.bubble_max_alpha_spin.valueChanged.connect(self.text_ctrl.on_bubble_max_alpha_change)
-        if getattr(self, 'bubble_max_alpha_slider', None):
-            self.bubble_max_alpha_slider.valueChanged.connect(self.text_ctrl.on_bubble_max_alpha_change)
-        if getattr(self, 'bubble_plain_alpha_spin', None):
-            self.bubble_plain_alpha_spin.valueChanged.connect(self.text_ctrl.on_bubble_plain_alpha_change)
-        if getattr(self, 'bubble_plain_alpha_slider', None):
-            self.bubble_plain_alpha_slider.valueChanged.connect(self.text_ctrl.on_bubble_plain_alpha_change)
-        if getattr(self, 'bubble_text_alpha_spin', None):
-            self.bubble_text_alpha_spin.valueChanged.connect(
-                partial(self.text_ctrl.on_bubble_text_alpha_change, source='spin')
+        if getattr(self, 'text_color_mode_combo', None):
+            self.text_color_mode_combo.currentIndexChanged.connect(self.text_ctrl.on_text_color_mode_change)
+        if getattr(self, 'custom_text_color_button', None):
+            self.custom_text_color_button.clicked.connect(self.text_ctrl.on_custom_text_color_change)
+        if getattr(self, 'text_opacity_spin', None):
+            self.text_opacity_spin.valueChanged.connect(
+                partial(self.text_ctrl.on_text_opacity_change, source='spin')
             )
-        if getattr(self, 'bubble_text_alpha_slider', None):
-            self.bubble_text_alpha_slider.valueChanged.connect(
-                partial(self.text_ctrl.on_bubble_text_alpha_change, source='slider')
+        if getattr(self, 'text_opacity_slider', None):
+            self.text_opacity_slider.valueChanged.connect(
+                partial(self.text_ctrl.on_text_opacity_change, source='slider')
             )
-        if getattr(self, 'bubble_gradient_checkbox', None):
-            self.bubble_gradient_checkbox.stateChanged.connect(self.text_ctrl.on_bubble_gradient_toggled)
-        if getattr(self, 'bubble_gradient_start_button', None):
-            self.bubble_gradient_start_button.clicked.connect(self.text_ctrl.on_bubble_gradient_start_change)
-        if getattr(self, 'bubble_gradient_end_button', None):
-            self.bubble_gradient_end_button.clicked.connect(self.text_ctrl.on_bubble_gradient_end_change)
-        if getattr(self, 'bubble_gradient_angle_spin', None):
-            self.bubble_gradient_angle_spin.valueChanged.connect(
-                partial(self.text_ctrl.on_bubble_gradient_angle_change, source='spin')
+        if getattr(self, 'stroke_checkbox', None):
+            self.stroke_checkbox.stateChanged.connect(self.text_ctrl.on_stroke_toggled)
+        if getattr(self, 'stroke_width_spin', None):
+            self.stroke_width_spin.valueChanged.connect(self.text_ctrl.on_stroke_width_change)
+        if getattr(self, 'stroke_opacity_spin', None):
+            self.stroke_opacity_spin.valueChanged.connect(
+                partial(self.text_ctrl.on_stroke_opacity_change, source='spin')
             )
-        if getattr(self, 'bubble_gradient_angle_slider', None):
-            self.bubble_gradient_angle_slider.valueChanged.connect(
-                partial(self.text_ctrl.on_bubble_gradient_angle_change, source='slider')
+        if getattr(self, 'stroke_opacity_slider', None):
+            self.stroke_opacity_slider.valueChanged.connect(
+                partial(self.text_ctrl.on_stroke_opacity_change, source='slider')
+            )
+        if getattr(self, 'auto_contrast_checkbox', None):
+            self.auto_contrast_checkbox.stateChanged.connect(self.text_ctrl.on_auto_contrast_toggled)
+        if getattr(self, 'background_box_mode_combo', None):
+            self.background_box_mode_combo.currentIndexChanged.connect(
+                self.text_ctrl.on_background_box_mode_change
+            )
+        if getattr(self, 'background_box_opacity_spin', None):
+            self.background_box_opacity_spin.valueChanged.connect(
+                partial(self.text_ctrl.on_background_box_opacity_change, source='spin')
+            )
+        if getattr(self, 'background_box_opacity_slider', None):
+            self.background_box_opacity_slider.valueChanged.connect(
+                partial(self.text_ctrl.on_background_box_opacity_change, source='slider')
             )
 
         # Page List

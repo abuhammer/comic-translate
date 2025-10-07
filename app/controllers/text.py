@@ -39,21 +39,19 @@ class TextController:
             getattr(self.main, 'outline_font_color_button', None),
             getattr(self.main, 'outline_width_dropdown', None),
             getattr(self.main, 'outline_checkbox', None),
-            getattr(self.main, 'bubble_mode_combo', None),
             getattr(self.main, 'bubble_color_button', None),
-            getattr(self.main, 'bubble_min_alpha_spin', None),
-            getattr(self.main, 'bubble_min_alpha_slider', None),
-            getattr(self.main, 'bubble_max_alpha_spin', None),
-            getattr(self.main, 'bubble_max_alpha_slider', None),
-            getattr(self.main, 'bubble_plain_alpha_spin', None),
-            getattr(self.main, 'bubble_plain_alpha_slider', None),
-            getattr(self.main, 'bubble_text_alpha_spin', None),
-            getattr(self.main, 'bubble_text_alpha_slider', None),
-            getattr(self.main, 'bubble_gradient_checkbox', None),
-            getattr(self.main, 'bubble_gradient_start_button', None),
-            getattr(self.main, 'bubble_gradient_end_button', None),
-            getattr(self.main, 'bubble_gradient_angle_spin', None),
-            getattr(self.main, 'bubble_gradient_angle_slider', None),
+            getattr(self.main, 'text_color_mode_combo', None),
+            getattr(self.main, 'custom_text_color_button', None),
+            getattr(self.main, 'text_opacity_spin', None),
+            getattr(self.main, 'text_opacity_slider', None),
+            getattr(self.main, 'stroke_checkbox', None),
+            getattr(self.main, 'stroke_width_spin', None),
+            getattr(self.main, 'stroke_opacity_spin', None),
+            getattr(self.main, 'stroke_opacity_slider', None),
+            getattr(self.main, 'auto_contrast_checkbox', None),
+            getattr(self.main, 'background_box_mode_combo', None),
+            getattr(self.main, 'background_box_opacity_spin', None),
+            getattr(self.main, 'background_box_opacity_slider', None),
         ]
         self.widgets_to_block = [widget for widget in widget_candidates if widget is not None]
 
@@ -73,27 +71,6 @@ class TextController:
         )
         button.setProperty('selected_color', color.name())
         button.update()
-
-    def _update_gradient_color_button(self, button_name: str, color: QColor) -> None:
-        button = getattr(self.main, button_name, None)
-        if button is None or not color.isValid():
-            return
-        button.setStyleSheet(
-            f"background-color: {color.name()}; border: none; border-radius: 5px;"
-        )
-        button.setProperty('selected_color', color.name())
-        button.update()
-
-    def _set_gradient_controls_enabled(self, enabled: bool) -> None:
-        for name in (
-            'bubble_gradient_start_button',
-            'bubble_gradient_end_button',
-            'bubble_gradient_angle_spin',
-            'bubble_gradient_angle_slider',
-        ):
-            widget = getattr(self.main, name, None)
-            if widget is not None:
-                widget.setEnabled(enabled)
 
     @staticmethod
     def _relative_luminance_rgb(rgb: tuple[int, int, int]) -> float:
@@ -126,73 +103,38 @@ class TextController:
         return None
 
     def _plain_style_from_config(self, render_settings: TextRenderingSettings) -> dict:
-        rgb = tuple(int(v) for v in render_settings.bubble_rgb[:3])
-        text_alpha = int(getattr(render_settings, 'bubble_text_alpha', 255))
-        mode = (render_settings.bubble_mode or 'auto').lower()
-        if mode == 'plain':
-            alpha = int(render_settings.bubble_plain_alpha)
-        elif mode == 'translucent':
-            alpha = int(max(render_settings.bubble_max_alpha, render_settings.bubble_plain_alpha))
+        fill_rgba = (0, 0, 0, 0)
+        text_alpha = int(max(0.0, min(1.0, render_settings.text_fill_opacity)) * 255)
+
+        mode = (render_settings.text_color_mode or 'auto').lower()
+        if mode == 'black':
+            text_rgb = (0, 0, 0)
+        elif mode == 'white':
+            text_rgb = (255, 255, 255)
+        elif mode == 'custom':
+            text_rgb = tuple(int(v) for v in render_settings.custom_text_rgb[:3])
         else:
-            alpha = int(render_settings.bubble_max_alpha)
+            text_rgb = (0, 0, 0)
 
-        fill_rgba = (*rgb, max(0, min(255, alpha)))
-        luminance = self._relative_luminance_rgb(rgb)
-        text_rgb = (0, 0, 0) if luminance >= 0.5 else (255, 255, 255)
-        outline_rgb = (0, 0, 0) if text_rgb == (255, 255, 255) else (255, 255, 255)
-
-        shadow_alpha = 120 if text_rgb == (255, 255, 255) else 90
+        outline_rgb = (255, 255, 255) if text_rgb == (0, 0, 0) else (0, 0, 0)
+        outline_alpha = 0
+        outline_width = 0.0
+        if render_settings.stroke_enabled:
+            outline_alpha = int(max(0.0, min(1.0, render_settings.stroke_opacity)) * 255)
+            outline_width = float(render_settings.stroke_width) if outline_alpha > 0 else 0.0
 
         style = {
             'fill_rgba': fill_rgba,
             'text_rgb': text_rgb,
             'text_alpha': text_alpha,
             'outline_rgb': outline_rgb,
-            'outline_width': 2.0,
-            'shadow_rgba': (outline_rgb[0], outline_rgb[1], outline_rgb[2], shadow_alpha),
+            'outline_alpha': outline_alpha,
+            'outline_width': outline_width,
+            'shadow_rgba': None,
             'shadow_offset': (0.0, 1.0),
-            'padding': (12.0, 8.0, 12.0, 8.0),
-            'corner_radius': 18.0,
+            'padding': (0.0, 0.0, 0.0, 0.0),
+            'corner_radius': 0.0,
             'reason': 'plain_fallback',
-        }
-        return self._apply_gradient_to_style(style, render_settings)
-
-    def _apply_gradient_to_style(
-        self, style: Optional[dict], render_settings: TextRenderingSettings
-    ) -> Optional[dict]:
-        if style is None:
-            return None
-
-        cfg = getattr(self.main, 'bubble_style_config', {})
-        enabled = bool(cfg.get('bubble_gradient_enabled', False))
-        if not enabled:
-            if 'fill_gradient' in style:
-                style.pop('fill_gradient', None)
-            return style
-
-        fill = style.get('fill_rgba')
-        alpha = 230
-        if isinstance(fill, (list, tuple)) and len(fill) >= 4:
-            alpha = int(fill[3])
-
-        def _to_rgb(value, default):
-            if isinstance(value, (list, tuple)) and len(value) >= 3:
-                return tuple(int(v) for v in value[:3])
-            return tuple(int(v) for v in default[:3])
-
-        start_rgb = _to_rgb(
-            cfg.get('bubble_gradient_start'), render_settings.bubble_rgb
-        )
-        end_rgb = _to_rgb(
-            cfg.get('bubble_gradient_end'), cfg.get('bubble_gradient_start', render_settings.bubble_rgb)
-        )
-        angle = float(cfg.get('bubble_gradient_angle', 90.0))
-
-        style['fill_gradient'] = {
-            'type': 'linear',
-            'angle': angle,
-            'start_rgba': (*start_rgb, alpha),
-            'end_rgba': (*end_rgb, alpha),
         }
         return style
 
@@ -214,14 +156,24 @@ class TextController:
             item.set_color(text_color)
 
         outline_rgb = style.get('outline_rgb')
+        outline_alpha = int(style.get('outline_alpha', getattr(blk, 'outline_alpha', 255)))
         outline_width = float(style.get('outline_width', getattr(blk, 'outline_width', 1.0)))
         blk.outline_width = outline_width
-        if outline_rgb:
-            outline_hex = '#{0:02X}{1:02X}{2:02X}'.format(*outline_rgb[:3])
-            blk.outline_color = outline_hex
-            item.set_outline(QColor(outline_hex), outline_width)
+        blk.outline_alpha = outline_alpha
+        if outline_rgb and outline_alpha > 0 and outline_width > 0:
+            outline_color = QColor(
+                int(outline_rgb[0]),
+                int(outline_rgb[1]),
+                int(outline_rgb[2]),
+                outline_alpha,
+            )
+            blk.outline_color = '#{0:02X}{1:02X}{2:02X}{3:02X}'.format(
+                outline_alpha, outline_rgb[0], outline_rgb[1], outline_rgb[2]
+            )
+            item.set_outline(outline_color, outline_width)
         else:
             blk.outline_color = ''
+            blk.outline_alpha = 0
             item.set_outline(None, outline_width)
 
         blk.bubble_style = copy.deepcopy(style)
@@ -461,18 +413,6 @@ class TextController:
         self.main.blk_list = updated_blk_list
         self.main.pipeline.load_box_coords(self.main.blk_list)
 
-    def on_bubble_mode_changed(self, *_):
-        combo = getattr(self.main, 'bubble_mode_combo', None)
-        if combo is None:
-            return
-        data = combo.currentData()
-        text = combo.currentText()
-        mode = (data or text or 'auto').lower()
-        if mode not in {'auto', 'plain', 'translucent'}:
-            mode = 'auto'
-        self.main.bubble_style_config['bubble_mode'] = mode
-        self.refresh_bubble_styles(recompute=True)
-
     def on_bubble_color_change(self):
         cfg = getattr(self.main, 'bubble_style_config', {})
         current_rgb = tuple(int(v) for v in cfg.get('bubble_rgb', (35, 100, 160))[:3])
@@ -480,89 +420,48 @@ class TextController:
         color = QColorDialog.getColor(initial_color, self.main, self.main.tr('Bubble Color'))
         if not color.isValid():
             return
-        prev_start = cfg.get('bubble_gradient_start')
-        if isinstance(prev_start, (list, tuple)):
-            prev_start = tuple(int(v) for v in prev_start[:3])
-        else:
-            prev_start = current_rgb
         cfg['bubble_rgb'] = (color.red(), color.green(), color.blue())
         self._update_bubble_color_button(color)
-        if tuple(prev_start) == tuple(current_rgb):
-            cfg['bubble_gradient_start'] = (color.red(), color.green(), color.blue())
-            self._update_gradient_color_button('bubble_gradient_start_button', color)
         self.refresh_bubble_styles(recompute=True)
 
-    def on_bubble_min_alpha_change(self, value: int):
+    def on_text_color_mode_change(self, *_):
         cfg = getattr(self.main, 'bubble_style_config', {})
-        value = int(value)
-        cfg['bubble_min_alpha'] = value
-        max_alpha = int(cfg.get('bubble_max_alpha', value))
-        if value > max_alpha:
-            cfg['bubble_max_alpha'] = value
-            spin = getattr(self.main, 'bubble_max_alpha_spin', None)
-            if spin is not None:
-                spin.blockSignals(True)
-                spin.setValue(value)
-                spin.blockSignals(False)
-        slider = getattr(self.main, 'bubble_min_alpha_slider', None)
-        if slider is not None and slider.value() != value:
-            slider.blockSignals(True)
-            slider.setValue(value)
-            slider.blockSignals(False)
+        combo = getattr(self.main, 'text_color_mode_combo', None)
+        if combo is None:
+            return
+        data = combo.currentData()
+        text = combo.currentText()
+        mode = (data or text or 'auto').lower()
+        if mode not in {'auto', 'black', 'white', 'custom'}:
+            mode = 'auto'
+        cfg['text_color_mode'] = mode
+        button = getattr(self.main, 'custom_text_color_button', None)
+        if button is not None:
+            button.setEnabled(mode == 'custom')
         self.refresh_bubble_styles(recompute=True)
 
-    def on_bubble_max_alpha_change(self, value: int):
+    def on_custom_text_color_change(self):
         cfg = getattr(self.main, 'bubble_style_config', {})
-        value = int(value)
-        cfg['bubble_max_alpha'] = value
-        min_alpha = int(cfg.get('bubble_min_alpha', value))
-        if value < min_alpha:
-            cfg['bubble_min_alpha'] = value
-            spin = getattr(self.main, 'bubble_min_alpha_spin', None)
-            if spin is not None:
-                spin.blockSignals(True)
-                spin.setValue(value)
-                spin.blockSignals(False)
-        plain_alpha = int(cfg.get('bubble_plain_alpha', value))
-        if value > plain_alpha:
-            cfg['bubble_plain_alpha'] = value
-            spin_plain = getattr(self.main, 'bubble_plain_alpha_spin', None)
-            if spin_plain is not None:
-                spin_plain.blockSignals(True)
-                spin_plain.setValue(value)
-                spin_plain.blockSignals(False)
-        slider = getattr(self.main, 'bubble_max_alpha_slider', None)
-        if slider is not None and slider.value() != value:
-            slider.blockSignals(True)
-            slider.setValue(value)
-            slider.blockSignals(False)
+        current_rgb = tuple(int(v) for v in cfg.get('custom_text_rgb', (0, 0, 0))[:3])
+        color = QColorDialog.getColor(QColor(*current_rgb), self.main, self.main.tr('Text Color'))
+        if not color.isValid():
+            return
+        cfg['custom_text_rgb'] = (color.red(), color.green(), color.blue())
+        button = getattr(self.main, 'custom_text_color_button', None)
+        if button is not None:
+            button.setProperty('selected_color', color.name())
+            button.setStyleSheet(
+                f"background-color: {color.name()}; border: none; border-radius: 5px;"
+            )
         self.refresh_bubble_styles(recompute=True)
 
-    def on_bubble_plain_alpha_change(self, value: int):
+    def on_text_opacity_change(self, value: int, source: str = 'spin'):
         cfg = getattr(self.main, 'bubble_style_config', {})
         value = int(value)
-        cfg['bubble_plain_alpha'] = value
-        max_alpha = int(cfg.get('bubble_max_alpha', value))
-        if value < max_alpha:
-            cfg['bubble_max_alpha'] = value
-            spin = getattr(self.main, 'bubble_max_alpha_spin', None)
-            if spin is not None:
-                spin.blockSignals(True)
-                spin.setValue(value)
-                spin.blockSignals(False)
-        slider = getattr(self.main, 'bubble_plain_alpha_slider', None)
-        if slider is not None and slider.value() != value:
-            slider.blockSignals(True)
-            slider.setValue(value)
-            slider.blockSignals(False)
-        self.refresh_bubble_styles(recompute=True)
-
-    def on_bubble_text_alpha_change(self, value: int, source: str = 'spin'):
-        cfg = getattr(self.main, 'bubble_style_config', {})
-        value = int(value)
-        cfg['bubble_text_alpha'] = value
-        spin = getattr(self.main, 'bubble_text_alpha_spin', None)
-        slider = getattr(self.main, 'bubble_text_alpha_slider', None)
+        value = max(0, min(100, value))
+        cfg['text_fill_opacity'] = value / 100.0
+        spin = getattr(self.main, 'text_opacity_spin', None)
+        slider = getattr(self.main, 'text_opacity_slider', None)
         if source != 'spin' and spin is not None and spin.value() != value:
             spin.blockSignals(True)
             spin.setValue(value)
@@ -573,51 +472,65 @@ class TextController:
             slider.blockSignals(False)
         self.refresh_bubble_styles(recompute=True)
 
-    def on_bubble_gradient_toggled(self, state: int):
+    def on_stroke_toggled(self, state: int):
         cfg = getattr(self.main, 'bubble_style_config', {})
         enabled = bool(state)
-        cfg['bubble_gradient_enabled'] = enabled
-        self._set_gradient_controls_enabled(enabled)
+        cfg['stroke_enabled'] = enabled
+        width_spin = getattr(self.main, 'stroke_width_spin', None)
+        opacity_spin = getattr(self.main, 'stroke_opacity_spin', None)
+        opacity_slider = getattr(self.main, 'stroke_opacity_slider', None)
+        for widget in (width_spin, opacity_spin, opacity_slider):
+            if widget is not None:
+                widget.setEnabled(enabled)
         self.refresh_bubble_styles(recompute=True)
 
-    def on_bubble_gradient_start_change(self):
+    def on_stroke_width_change(self, value: int):
         cfg = getattr(self.main, 'bubble_style_config', {})
-        current = cfg.get('bubble_gradient_start', cfg.get('bubble_rgb', (35, 100, 160)))
-        if isinstance(current, (list, tuple)):
-            current = tuple(int(v) for v in current[:3])
-        else:
-            current = (35, 100, 160)
-        color = QColorDialog.getColor(
-            QColor(*current), self.main, self.main.tr('Gradient Start Color')
-        )
-        if not color.isValid():
-            return
-        cfg['bubble_gradient_start'] = (color.red(), color.green(), color.blue())
-        self._update_gradient_color_button('bubble_gradient_start_button', color)
+        cfg['stroke_width'] = float(max(0, value))
         self.refresh_bubble_styles(recompute=True)
 
-    def on_bubble_gradient_end_change(self):
-        cfg = getattr(self.main, 'bubble_style_config', {})
-        current = cfg.get('bubble_gradient_end', cfg.get('bubble_gradient_start', cfg.get('bubble_rgb', (35, 100, 160))))
-        if isinstance(current, (list, tuple)):
-            current = tuple(int(v) for v in current[:3])
-        else:
-            current = (200, 220, 255)
-        color = QColorDialog.getColor(
-            QColor(*current), self.main, self.main.tr('Gradient End Color')
-        )
-        if not color.isValid():
-            return
-        cfg['bubble_gradient_end'] = (color.red(), color.green(), color.blue())
-        self._update_gradient_color_button('bubble_gradient_end_button', color)
-        self.refresh_bubble_styles(recompute=True)
-
-    def on_bubble_gradient_angle_change(self, value: int, source: str = ''):
+    def on_stroke_opacity_change(self, value: int, source: str = 'spin'):
         cfg = getattr(self.main, 'bubble_style_config', {})
         value = int(value)
-        cfg['bubble_gradient_angle'] = float(value)
-        spin = getattr(self.main, 'bubble_gradient_angle_spin', None)
-        slider = getattr(self.main, 'bubble_gradient_angle_slider', None)
+        value = max(0, min(100, value))
+        cfg['stroke_opacity'] = value / 100.0
+        spin = getattr(self.main, 'stroke_opacity_spin', None)
+        slider = getattr(self.main, 'stroke_opacity_slider', None)
+        if source != 'spin' and spin is not None and spin.value() != value:
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
+        if source != 'slider' and slider is not None and slider.value() != value:
+            slider.blockSignals(True)
+            slider.setValue(value)
+            slider.blockSignals(False)
+        self.refresh_bubble_styles(recompute=True)
+
+    def on_auto_contrast_toggled(self, state: int):
+        cfg = getattr(self.main, 'bubble_style_config', {})
+        cfg['auto_contrast'] = bool(state)
+        self.refresh_bubble_styles(recompute=True)
+
+    def on_background_box_mode_change(self, *_):
+        cfg = getattr(self.main, 'bubble_style_config', {})
+        combo = getattr(self.main, 'background_box_mode_combo', None)
+        if combo is None:
+            return
+        data = combo.currentData()
+        text = combo.currentText()
+        mode = (data or text or 'off').lower()
+        if mode not in {'off', 'auto', 'on'}:
+            mode = 'off'
+        cfg['background_box_mode'] = mode
+        self.refresh_bubble_styles(recompute=True)
+
+    def on_background_box_opacity_change(self, value: int, source: str = 'spin'):
+        cfg = getattr(self.main, 'bubble_style_config', {})
+        value = int(value)
+        value = max(0, min(30, value))
+        cfg['background_box_opacity'] = min(0.3, value / 100.0)
+        spin = getattr(self.main, 'background_box_opacity_spin', None)
+        slider = getattr(self.main, 'background_box_opacity_slider', None)
         if source != 'spin' and spin is not None and spin.value() != value:
             spin.blockSignals(True)
             spin.setValue(value)
@@ -652,24 +565,40 @@ class TextController:
                         background_image,
                         blk,
                         bubble_rgb=render_settings.bubble_rgb,
-                        min_alpha=render_settings.bubble_min_alpha,
-                        max_alpha=render_settings.bubble_max_alpha,
+                        background_box_mode=render_settings.background_box_mode,
+                        background_box_opacity=render_settings.background_box_opacity,
+                        text_color_mode=render_settings.text_color_mode,
+                        custom_text_rgb=render_settings.custom_text_rgb,
+                        text_opacity=render_settings.text_fill_opacity,
+                        stroke_enabled=render_settings.stroke_enabled,
+                        stroke_width=render_settings.stroke_width,
+                        stroke_opacity=render_settings.stroke_opacity,
+                        auto_contrast=render_settings.auto_contrast,
                         text_min_contrast=render_settings.text_target_contrast,
-                        bubble_mode=render_settings.bubble_mode,
-                        plain_alpha=render_settings.bubble_plain_alpha,
-                        plain_thresh_hi=render_settings.bubble_plain_hi,
-                        plain_thresh_lo=render_settings.bubble_plain_lo,
-                        flat_var=render_settings.bubble_flat_var,
-                        text_alpha=render_settings.bubble_text_alpha,
+                        background_plain_hi=render_settings.background_plain_hi,
+                        background_plain_lo=render_settings.background_plain_lo,
+                        flat_variance_threshold=render_settings.flat_variance_threshold,
+                        auto_stroke_opacity=render_settings.auto_stroke_opacity,
                     )
                 except Exception:
-                    logger.exception("Failed to recompute bubble style for block", exc_info=True)
+                    logger.exception(
+                        "Failed to recompute bubble style for block", exc_info=True
+                    )
 
             if style_obj is not None:
                 style_dict = style_obj.to_dict()
                 blk.font_color = '#{0:02X}{1:02X}{2:02X}'.format(*style_obj.text_rgb)
                 blk.font_alpha = int(style_obj.text_alpha)
-                blk.outline_color = '#{0:02X}{1:02X}{2:02X}'.format(*style_obj.outline_rgb)
+                blk.outline_alpha = int(style_obj.outline_alpha)
+                if style_obj.outline_alpha > 0 and style_obj.outline_width > 0:
+                    blk.outline_color = '#{0:02X}{1:02X}{2:02X}{3:02X}'.format(
+                        style_obj.outline_alpha,
+                        style_obj.outline_rgb[0],
+                        style_obj.outline_rgb[1],
+                        style_obj.outline_rgb[2],
+                    )
+                else:
+                    blk.outline_color = ''
                 blk.outline_width = style_obj.outline_width
             elif not recompute:
                 existing_style = getattr(blk, 'bubble_style', None)
@@ -678,10 +607,22 @@ class TextController:
                 style_dict = self._plain_style_from_config(render_settings)
                 blk.font_color = '#{0:02X}{1:02X}{2:02X}'.format(*style_dict['text_rgb'])
                 blk.font_alpha = int(style_dict.get('text_alpha', 255))
-                blk.outline_color = '#{0:02X}{1:02X}{2:02X}'.format(*style_dict['outline_rgb'])
-                blk.outline_width = float(style_dict.get('outline_width', getattr(blk, 'outline_width', 2.0)))
+                outline_rgb = style_dict.get('outline_rgb', (0, 0, 0))
+                outline_alpha = int(style_dict.get('outline_alpha', 0))
+                blk.outline_alpha = outline_alpha
+                if outline_alpha > 0 and style_dict.get('outline_width', 0) > 0:
+                    blk.outline_color = '#{0:02X}{1:02X}{2:02X}{3:02X}'.format(
+                        outline_alpha,
+                        outline_rgb[0],
+                        outline_rgb[1],
+                        outline_rgb[2],
+                    )
+                else:
+                    blk.outline_color = ''
+                blk.outline_width = float(
+                    style_dict.get('outline_width', getattr(blk, 'outline_width', 2.0))
+                )
 
-            style_dict = self._apply_gradient_to_style(style_dict, render_settings)
             self._apply_style_to_item(item, blk, style_dict)
 
     # Formatting actions
@@ -1018,86 +959,87 @@ class TextController:
         target_lang = self.main.lang_mapping.get(self.main.t_combo.currentText(), None)
         direction = get_layout_direction(target_lang)
 
-        bubble_mode = 'auto'
-        if hasattr(self.main, 'bubble_mode_combo'):
-            combo = self.main.bubble_mode_combo
-            data = combo.currentData()
-            bubble_mode = (data or combo.currentText() or 'auto').lower()
-
         bubble_config = getattr(self.main, 'bubble_style_config', {})
         bubble_rgb = bubble_config.get('bubble_rgb', (35, 100, 160))
         if isinstance(bubble_rgb, (list, tuple)):
             bubble_rgb = tuple(int(v) for v in bubble_rgb[:3])
         else:
             bubble_rgb = (35, 100, 160)
-        bubble_min_alpha = int(bubble_config.get('bubble_min_alpha', 110))
-        bubble_max_alpha = int(bubble_config.get('bubble_max_alpha', 205))
-        bubble_plain_hi = float(bubble_config.get('bubble_plain_hi', 0.88))
-        bubble_plain_lo = float(bubble_config.get('bubble_plain_lo', 0.12))
-        bubble_flat_var = float(bubble_config.get('bubble_flat_var', 8e-4))
-        bubble_plain_alpha = int(bubble_config.get('bubble_plain_alpha', 230))
+
+        text_color_mode = (bubble_config.get('text_color_mode', 'auto') or 'auto').lower()
+        custom_text_rgb = bubble_config.get('custom_text_rgb', (0, 0, 0))
+        if isinstance(custom_text_rgb, (list, tuple)):
+            custom_text_rgb = tuple(int(v) for v in custom_text_rgb[:3])
+        else:
+            custom_text_rgb = (0, 0, 0)
+
+        text_fill_opacity = float(bubble_config.get('text_fill_opacity', 1.0))
+        stroke_enabled = bool(bubble_config.get('stroke_enabled', False))
+        stroke_width = float(bubble_config.get('stroke_width', 2.0))
+        stroke_opacity = float(bubble_config.get('stroke_opacity', 1.0))
+        auto_contrast = bool(bubble_config.get('auto_contrast', True))
         text_target_contrast = float(bubble_config.get('text_target_contrast', 4.5))
-        bubble_text_alpha = int(bubble_config.get('bubble_text_alpha', 255))
-        gradient_enabled = bool(bubble_config.get('bubble_gradient_enabled', False))
+        background_box_mode = (bubble_config.get('background_box_mode', 'off') or 'off').lower()
+        background_box_opacity = float(bubble_config.get('background_box_opacity', 0.25))
+        background_plain_hi = float(bubble_config.get('background_plain_hi', 0.95))
+        background_plain_lo = float(bubble_config.get('background_plain_lo', 0.05))
+        flat_variance_threshold = float(bubble_config.get('flat_variance_threshold', 4e-4))
+        auto_stroke_opacity = float(bubble_config.get('auto_stroke_opacity', 0.6))
 
-        def _rgb_tuple(key, default):
-            value = bubble_config.get(key, default)
-            if isinstance(value, (list, tuple)):
-                return tuple(int(v) for v in value[:3])
-            return default
+        # Clamp persisted values to safe ranges
+        text_fill_opacity = max(0.0, min(1.0, text_fill_opacity))
+        stroke_opacity = max(0.0, min(1.0, stroke_opacity))
+        background_box_opacity = max(0.0, min(0.3, background_box_opacity))
+        auto_stroke_opacity = max(0.0, min(1.0, auto_stroke_opacity))
 
-        gradient_start = _rgb_tuple('bubble_gradient_start', bubble_rgb)
-        gradient_end = _rgb_tuple('bubble_gradient_end', gradient_start)
-        gradient_angle = float(bubble_config.get('bubble_gradient_angle', 90.0))
-
-        # Keep the configuration in sync so project saves persist overrides
         self.main.bubble_style_config.update(
             {
-                'bubble_mode': bubble_mode,
                 'bubble_rgb': bubble_rgb,
-                'bubble_min_alpha': bubble_min_alpha,
-                'bubble_max_alpha': bubble_max_alpha,
-                'bubble_plain_hi': bubble_plain_hi,
-                'bubble_plain_lo': bubble_plain_lo,
-                'bubble_flat_var': bubble_flat_var,
-                'bubble_plain_alpha': bubble_plain_alpha,
+                'text_color_mode': text_color_mode,
+                'custom_text_rgb': custom_text_rgb,
+                'text_fill_opacity': text_fill_opacity,
+                'stroke_enabled': stroke_enabled,
+                'stroke_width': stroke_width,
+                'stroke_opacity': stroke_opacity,
+                'auto_contrast': auto_contrast,
                 'text_target_contrast': text_target_contrast,
-                'bubble_text_alpha': bubble_text_alpha,
-                'bubble_gradient_enabled': gradient_enabled,
-                'bubble_gradient_start': gradient_start,
-                'bubble_gradient_end': gradient_end,
-                'bubble_gradient_angle': gradient_angle,
+                'background_box_mode': background_box_mode,
+                'background_box_opacity': background_box_opacity,
+                'background_plain_hi': background_plain_hi,
+                'background_plain_lo': background_plain_lo,
+                'flat_variance_threshold': flat_variance_threshold,
+                'auto_stroke_opacity': auto_stroke_opacity,
             }
         )
-        self._set_gradient_controls_enabled(gradient_enabled)
 
         return TextRenderingSettings(
-            alignment_id = self.main.alignment_tool_group.get_dayu_checked(),
-            font_family = self.main.font_dropdown.currentText(),
-            min_font_size = int(self.main.settings_page.ui.min_font_spinbox.value()),
-            max_font_size = int(self.main.settings_page.ui.max_font_spinbox.value()),
-            color = self.main.block_font_color_button.property('selected_color'),
-            upper_case = self.main.settings_page.ui.uppercase_checkbox.isChecked(),
-            outline = self.main.outline_checkbox.isChecked(),
-            outline_color = self.main.outline_font_color_button.property('selected_color'),
-            outline_width = self.main.outline_width_dropdown.currentText(),
-            bold = self.main.bold_button.isChecked(),
-            italic = self.main.italic_button.isChecked(),
-            underline = self.main.underline_button.isChecked(),
-            line_spacing = self.main.line_spacing_dropdown.currentText(),
-            direction = direction,
-            bubble_mode = bubble_mode,
-            bubble_rgb = bubble_rgb,
-            bubble_min_alpha = bubble_min_alpha,
-            bubble_max_alpha = bubble_max_alpha,
-            bubble_plain_hi = bubble_plain_hi,
-            bubble_plain_lo = bubble_plain_lo,
-            bubble_flat_var = bubble_flat_var,
-            bubble_plain_alpha = bubble_plain_alpha,
-            text_target_contrast = text_target_contrast,
-            bubble_text_alpha = bubble_text_alpha,
-            bubble_gradient_enabled = gradient_enabled,
-            bubble_gradient_start = gradient_start,
-            bubble_gradient_end = gradient_end,
-            bubble_gradient_angle = gradient_angle,
+            alignment_id=self.main.alignment_tool_group.get_dayu_checked(),
+            font_family=self.main.font_dropdown.currentText(),
+            min_font_size=int(self.main.settings_page.ui.min_font_spinbox.value()),
+            max_font_size=int(self.main.settings_page.ui.max_font_spinbox.value()),
+            color=self.main.block_font_color_button.property('selected_color'),
+            upper_case=self.main.settings_page.ui.uppercase_checkbox.isChecked(),
+            outline=self.main.outline_checkbox.isChecked(),
+            outline_color=self.main.outline_font_color_button.property('selected_color'),
+            outline_width=self.main.outline_width_dropdown.currentText(),
+            bold=self.main.bold_button.isChecked(),
+            italic=self.main.italic_button.isChecked(),
+            underline=self.main.underline_button.isChecked(),
+            line_spacing=self.main.line_spacing_dropdown.currentText(),
+            direction=direction,
+            bubble_rgb=bubble_rgb,
+            text_color_mode=text_color_mode,
+            custom_text_rgb=custom_text_rgb,
+            text_fill_opacity=text_fill_opacity,
+            stroke_enabled=stroke_enabled,
+            stroke_width=stroke_width,
+            stroke_opacity=stroke_opacity,
+            auto_contrast=auto_contrast,
+            text_target_contrast=text_target_contrast,
+            background_box_mode=background_box_mode,
+            background_box_opacity=background_box_opacity,
+            background_plain_hi=background_plain_hi,
+            background_plain_lo=background_plain_lo,
+            flat_variance_threshold=flat_variance_threshold,
+            auto_stroke_opacity=auto_stroke_opacity,
         )

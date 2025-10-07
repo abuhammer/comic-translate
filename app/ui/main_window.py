@@ -319,15 +319,6 @@ class ComicTranslateUI(QtWidgets.QMainWindow):
         self.hbutton_group.set_button_list(button_config_list)
         self.hbutton_group.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
-        self.bubble_mode_combo = MComboBox().small()
-        self.bubble_mode_combo.setToolTip(self.tr("Bubble Mode"))
-        self.bubble_mode_combo.addItem(self.tr("Auto"), "auto")
-        self.bubble_mode_combo.addItem(self.tr("Plain"), "plain")
-        self.bubble_mode_combo.addItem(self.tr("Translucent"), "translucent")
-        self.bubble_mode_combo.setCurrentIndex(0)
-        self.bubble_mode_combo.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        self.bubble_mode_combo.setFixedWidth(130)
-
         # Add progress bar
         self.progress_bar = MProgressBar().auto_color()
         self.progress_bar.setValue(0)
@@ -361,7 +352,6 @@ class ComicTranslateUI(QtWidgets.QMainWindow):
 
         header_layout.addWidget(self.undo_tool_group)
         header_layout.addWidget(self.hbutton_group)
-        header_layout.addWidget(self.bubble_mode_combo)
         header_layout.addWidget(self.loading)
         header_layout.addStretch()
         header_layout.addWidget(self.webtoon_toggle)
@@ -531,10 +521,15 @@ class ComicTranslateUI(QtWidgets.QMainWindow):
         # Bubble styling controls
         bubble_cfg = getattr(self, 'bubble_style_config', {
             'bubble_rgb': (35, 100, 160),
-            'bubble_min_alpha': 110,
-            'bubble_max_alpha': 205,
-            'bubble_plain_alpha': 230,
-            'bubble_text_alpha': 255,
+            'text_color_mode': 'auto',
+            'custom_text_rgb': (0, 0, 0),
+            'text_fill_opacity': 1.0,
+            'stroke_enabled': False,
+            'stroke_width': 2.0,
+            'stroke_opacity': 1.0,
+            'auto_contrast': True,
+            'background_box_mode': 'off',
+            'background_box_opacity': 0.25,
         })
 
         bubble_settings_layout = QtWidgets.QGridLayout()
@@ -551,108 +546,102 @@ class ComicTranslateUI(QtWidgets.QMainWindow):
         )
         self.bubble_color_button.setProperty('selected_color', bubble_hex)
 
-        bubble_min_alpha_label = QtWidgets.QLabel(self.tr('Min Alpha'))
-        self.bubble_min_alpha_spin = MSpinBox().small()
-        self.bubble_min_alpha_spin.setRange(0, 255)
-        self.bubble_min_alpha_spin.setValue(int(bubble_cfg.get('bubble_min_alpha', 110)))
-        self.bubble_min_alpha_slider = MSlider()
-        self.bubble_min_alpha_slider.setRange(0, 255)
-        self.bubble_min_alpha_slider.setValue(self.bubble_min_alpha_spin.value())
-        self.bubble_min_alpha_slider.setToolTip(self.tr('Minimum bubble opacity'))
+        text_color_mode_label = QtWidgets.QLabel(self.tr('Text Color'))
+        self.text_color_mode_combo = QtWidgets.QComboBox()
+        self.text_color_mode_combo.addItem(self.tr('Auto'), 'auto')
+        self.text_color_mode_combo.addItem(self.tr('Black'), 'black')
+        self.text_color_mode_combo.addItem(self.tr('White'), 'white')
+        self.text_color_mode_combo.addItem(self.tr('Picker'), 'custom')
+        current_mode = bubble_cfg.get('text_color_mode', 'auto')
+        index = max(0, self.text_color_mode_combo.findData(current_mode))
+        self.text_color_mode_combo.setCurrentIndex(index)
 
-        bubble_max_alpha_label = QtWidgets.QLabel(self.tr('Max Alpha'))
-        self.bubble_max_alpha_spin = MSpinBox().small()
-        self.bubble_max_alpha_spin.setRange(0, 255)
-        self.bubble_max_alpha_spin.setValue(int(bubble_cfg.get('bubble_max_alpha', 205)))
-        self.bubble_max_alpha_slider = MSlider()
-        self.bubble_max_alpha_slider.setRange(0, 255)
-        self.bubble_max_alpha_slider.setValue(self.bubble_max_alpha_spin.value())
-        self.bubble_max_alpha_slider.setToolTip(self.tr('Maximum bubble opacity'))
-
-        bubble_plain_alpha_label = QtWidgets.QLabel(self.tr('Plain Alpha'))
-        self.bubble_plain_alpha_spin = MSpinBox().small()
-        self.bubble_plain_alpha_spin.setRange(0, 255)
-        self.bubble_plain_alpha_spin.setValue(int(bubble_cfg.get('bubble_plain_alpha', 230)))
-        self.bubble_plain_alpha_slider = MSlider()
-        self.bubble_plain_alpha_slider.setRange(0, 255)
-        self.bubble_plain_alpha_slider.setValue(self.bubble_plain_alpha_spin.value())
-        self.bubble_plain_alpha_slider.setToolTip(self.tr('Plain bubble opacity'))
-
-        text_alpha_value = int(bubble_cfg.get('bubble_text_alpha', 255))
-        gradient_enabled = bool(bubble_cfg.get('bubble_gradient_enabled', False))
-        gradient_start_rgb = tuple(int(v) for v in bubble_cfg.get('bubble_gradient_start', bubble_rgb))
-        gradient_end_rgb = tuple(int(v) for v in bubble_cfg.get('bubble_gradient_end', gradient_start_rgb))
-        gradient_angle = int(float(bubble_cfg.get('bubble_gradient_angle', 90.0)))
-
-        text_alpha_label = QtWidgets.QLabel(self.tr('Text Alpha'))
-        self.bubble_text_alpha_spin = MSpinBox().small()
-        self.bubble_text_alpha_spin.setRange(0, 255)
-        self.bubble_text_alpha_spin.setValue(text_alpha_value)
-        self.bubble_text_alpha_slider = MSlider()
-        self.bubble_text_alpha_slider.setRange(0, 255)
-        self.bubble_text_alpha_slider.setValue(text_alpha_value)
-        self.bubble_text_alpha_slider.setToolTip(self.tr('Text opacity'))
-
-        self.bubble_gradient_checkbox = MCheckBox(self.tr('Gradient Fill'))
-        self.bubble_gradient_checkbox.setChecked(gradient_enabled)
-
-        gradient_start_label = QtWidgets.QLabel(self.tr('Start'))
-        self.bubble_gradient_start_button = QtWidgets.QPushButton()
-        self.bubble_gradient_start_button.setFixedSize(30, 30)
-        start_hex = '#{0:02X}{1:02X}{2:02X}'.format(*gradient_start_rgb)
-        self.bubble_gradient_start_button.setStyleSheet(
-            f"background-color: {start_hex}; border: none; border-radius: 5px;"
+        custom_rgb = tuple(int(v) for v in bubble_cfg.get('custom_text_rgb', (0, 0, 0)))
+        custom_hex = '#{0:02X}{1:02X}{2:02X}'.format(*custom_rgb)
+        self.custom_text_color_button = QtWidgets.QPushButton()
+        self.custom_text_color_button.setFixedSize(30, 30)
+        self.custom_text_color_button.setStyleSheet(
+            f"background-color: {custom_hex}; border: none; border-radius: 5px;"
         )
-        self.bubble_gradient_start_button.setProperty('selected_color', start_hex)
+        self.custom_text_color_button.setProperty('selected_color', custom_hex)
+        self.custom_text_color_button.setToolTip(self.tr('Pick custom text color'))
 
-        gradient_end_label = QtWidgets.QLabel(self.tr('End'))
-        self.bubble_gradient_end_button = QtWidgets.QPushButton()
-        self.bubble_gradient_end_button.setFixedSize(30, 30)
-        end_hex = '#{0:02X}{1:02X}{2:02X}'.format(*gradient_end_rgb)
-        self.bubble_gradient_end_button.setStyleSheet(
-            f"background-color: {end_hex}; border: none; border-radius: 5px;"
-        )
-        self.bubble_gradient_end_button.setProperty('selected_color', end_hex)
+        text_opacity_pct = int(round(float(bubble_cfg.get('text_fill_opacity', 1.0)) * 100))
+        text_opacity_pct = max(0, min(100, text_opacity_pct))
+        text_opacity_label = QtWidgets.QLabel(self.tr('Text Opacity'))
+        self.text_opacity_spin = MSpinBox().small()
+        self.text_opacity_spin.setRange(0, 100)
+        self.text_opacity_spin.setValue(text_opacity_pct)
+        self.text_opacity_slider = MSlider()
+        self.text_opacity_slider.setRange(0, 100)
+        self.text_opacity_slider.setValue(text_opacity_pct)
 
-        gradient_angle_label = QtWidgets.QLabel(self.tr('Angle'))
-        self.bubble_gradient_angle_spin = MSpinBox().small()
-        self.bubble_gradient_angle_spin.setRange(0, 360)
-        self.bubble_gradient_angle_spin.setValue(gradient_angle)
-        self.bubble_gradient_angle_slider = MSlider()
-        self.bubble_gradient_angle_slider.setRange(0, 360)
-        self.bubble_gradient_angle_slider.setValue(gradient_angle)
-        self.bubble_gradient_angle_slider.setToolTip(self.tr('Gradient angle'))
+        stroke_enabled = bool(bubble_cfg.get('stroke_enabled', False))
+        stroke_group_label = QtWidgets.QLabel(self.tr('Stroke'))
+        self.stroke_checkbox = MCheckBox(self.tr('Enable'))
+        self.stroke_checkbox.setChecked(stroke_enabled)
 
-        for widget in (
-            self.bubble_gradient_start_button,
-            self.bubble_gradient_end_button,
-            self.bubble_gradient_angle_spin,
-            self.bubble_gradient_angle_slider,
-        ):
-            widget.setEnabled(gradient_enabled)
+        stroke_width_value = float(bubble_cfg.get('stroke_width', 2.0))
+        self.stroke_width_spin = MSpinBox().small()
+        self.stroke_width_spin.setRange(0, 10)
+        self.stroke_width_spin.setValue(int(round(stroke_width_value)))
+
+        stroke_opacity_pct = int(round(float(bubble_cfg.get('stroke_opacity', 1.0)) * 100))
+        stroke_opacity_pct = max(0, min(100, stroke_opacity_pct))
+        self.stroke_opacity_slider = MSlider()
+        self.stroke_opacity_slider.setRange(0, 100)
+        self.stroke_opacity_slider.setValue(stroke_opacity_pct)
+        self.stroke_opacity_spin = MSpinBox().small()
+        self.stroke_opacity_spin.setRange(0, 100)
+        self.stroke_opacity_spin.setValue(stroke_opacity_pct)
+
+        self.auto_contrast_checkbox = MCheckBox(self.tr('Auto contrast'))
+        self.auto_contrast_checkbox.setChecked(bool(bubble_cfg.get('auto_contrast', True)))
+
+        box_mode_label = QtWidgets.QLabel(self.tr('Background Box'))
+        self.background_box_mode_combo = QtWidgets.QComboBox()
+        self.background_box_mode_combo.addItem(self.tr('Off'), 'off')
+        self.background_box_mode_combo.addItem(self.tr('Auto'), 'auto')
+        self.background_box_mode_combo.addItem(self.tr('On'), 'on')
+        box_mode = bubble_cfg.get('background_box_mode', 'off')
+        box_index = max(0, self.background_box_mode_combo.findData(box_mode))
+        self.background_box_mode_combo.setCurrentIndex(box_index)
+
+        box_opacity_pct = int(round(float(bubble_cfg.get('background_box_opacity', 0.25)) * 100))
+        box_opacity_pct = max(0, min(30, box_opacity_pct))
+        self.background_box_opacity_spin = MSpinBox().small()
+        self.background_box_opacity_spin.setRange(0, 30)
+        self.background_box_opacity_spin.setValue(box_opacity_pct)
+        self.background_box_opacity_slider = MSlider()
+        self.background_box_opacity_slider.setRange(0, 30)
+        self.background_box_opacity_slider.setValue(box_opacity_pct)
 
         bubble_settings_layout.addWidget(bubble_color_label, 0, 0)
         bubble_settings_layout.addWidget(self.bubble_color_button, 0, 1)
-        bubble_settings_layout.addWidget(bubble_min_alpha_label, 1, 0)
-        bubble_settings_layout.addWidget(self.bubble_min_alpha_spin, 1, 1)
-        bubble_settings_layout.addWidget(self.bubble_min_alpha_slider, 1, 2)
-        bubble_settings_layout.addWidget(bubble_max_alpha_label, 2, 0)
-        bubble_settings_layout.addWidget(self.bubble_max_alpha_spin, 2, 1)
-        bubble_settings_layout.addWidget(self.bubble_max_alpha_slider, 2, 2)
-        bubble_settings_layout.addWidget(bubble_plain_alpha_label, 3, 0)
-        bubble_settings_layout.addWidget(self.bubble_plain_alpha_spin, 3, 1)
-        bubble_settings_layout.addWidget(self.bubble_plain_alpha_slider, 3, 2)
-        bubble_settings_layout.addWidget(text_alpha_label, 4, 0)
-        bubble_settings_layout.addWidget(self.bubble_text_alpha_spin, 4, 1)
-        bubble_settings_layout.addWidget(self.bubble_text_alpha_slider, 4, 2)
-        bubble_settings_layout.addWidget(self.bubble_gradient_checkbox, 5, 0, 1, 3)
-        bubble_settings_layout.addWidget(gradient_start_label, 6, 0)
-        bubble_settings_layout.addWidget(self.bubble_gradient_start_button, 6, 1)
-        bubble_settings_layout.addWidget(gradient_end_label, 7, 0)
-        bubble_settings_layout.addWidget(self.bubble_gradient_end_button, 7, 1)
-        bubble_settings_layout.addWidget(gradient_angle_label, 8, 0)
-        bubble_settings_layout.addWidget(self.bubble_gradient_angle_spin, 8, 1)
-        bubble_settings_layout.addWidget(self.bubble_gradient_angle_slider, 8, 2)
+        bubble_settings_layout.addWidget(text_color_mode_label, 1, 0)
+        bubble_settings_layout.addWidget(self.text_color_mode_combo, 1, 1)
+        bubble_settings_layout.addWidget(self.custom_text_color_button, 1, 2)
+        bubble_settings_layout.addWidget(text_opacity_label, 2, 0)
+        bubble_settings_layout.addWidget(self.text_opacity_spin, 2, 1)
+        bubble_settings_layout.addWidget(self.text_opacity_slider, 2, 2)
+        bubble_settings_layout.addWidget(stroke_group_label, 3, 0)
+        stroke_controls = QtWidgets.QHBoxLayout()
+        stroke_controls.addWidget(self.stroke_checkbox)
+        stroke_controls.addWidget(QtWidgets.QLabel(self.tr('Width')))
+        stroke_controls.addWidget(self.stroke_width_spin)
+        stroke_controls.addWidget(QtWidgets.QLabel(self.tr('Opacity')))
+        stroke_controls.addWidget(self.stroke_opacity_spin)
+        stroke_controls.addWidget(self.stroke_opacity_slider)
+        stroke_container = QtWidgets.QWidget()
+        stroke_container.setLayout(stroke_controls)
+        bubble_settings_layout.addWidget(stroke_container, 3, 1, 1, 2)
+        bubble_settings_layout.addWidget(self.auto_contrast_checkbox, 4, 0, 1, 3)
+        bubble_settings_layout.addWidget(box_mode_label, 5, 0)
+        bubble_settings_layout.addWidget(self.background_box_mode_combo, 5, 1)
+        bubble_box_opacity_label = QtWidgets.QLabel(self.tr('Box Opacity (%)'))
+        bubble_settings_layout.addWidget(bubble_box_opacity_label, 6, 0)
+        bubble_settings_layout.addWidget(self.background_box_opacity_spin, 6, 1)
+        bubble_settings_layout.addWidget(self.background_box_opacity_slider, 6, 2)
 
         rendering_divider_top = MDivider()
         rendering_divider_bottom = MDivider()

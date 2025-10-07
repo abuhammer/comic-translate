@@ -9,7 +9,7 @@ import imkit as imk
 
 from PySide6 import QtWidgets
 from PySide6.QtCore import QSettings
-from PySide6.QtGui import QUndoStack, QColor
+from PySide6.QtGui import QUndoStack
 
 from app.ui.canvas.text_item import TextBlockItem
 from app.ui.canvas.text.text_item_properties import TextItemProperties
@@ -234,20 +234,21 @@ class ProjectController:
 
         settings.beginGroup('text_rendering')
         bubble_cfg = getattr(self.main, 'bubble_style_config', {})
-        settings.setValue('bubble_mode', bubble_cfg.get('bubble_mode', 'auto'))
         settings.setValue('bubble_rgb', list(bubble_cfg.get('bubble_rgb', (35, 100, 160))))
-        settings.setValue('bubble_min_alpha', int(bubble_cfg.get('bubble_min_alpha', 110)))
-        settings.setValue('bubble_max_alpha', int(bubble_cfg.get('bubble_max_alpha', 205)))
-        settings.setValue('bubble_plain_hi', float(bubble_cfg.get('bubble_plain_hi', 0.88)))
-        settings.setValue('bubble_plain_lo', float(bubble_cfg.get('bubble_plain_lo', 0.12)))
-        settings.setValue('bubble_flat_var', float(bubble_cfg.get('bubble_flat_var', 8e-4)))
-        settings.setValue('bubble_plain_alpha', int(bubble_cfg.get('bubble_plain_alpha', 230)))
+        settings.setValue('text_color_mode', bubble_cfg.get('text_color_mode', 'auto'))
+        settings.setValue('custom_text_rgb', list(bubble_cfg.get('custom_text_rgb', (0, 0, 0))))
+        settings.setValue('text_fill_opacity', float(bubble_cfg.get('text_fill_opacity', 1.0)))
+        settings.setValue('stroke_enabled', bool(bubble_cfg.get('stroke_enabled', False)))
+        settings.setValue('stroke_width', float(bubble_cfg.get('stroke_width', 2.0)))
+        settings.setValue('stroke_opacity', float(bubble_cfg.get('stroke_opacity', 1.0)))
+        settings.setValue('auto_contrast', bool(bubble_cfg.get('auto_contrast', True)))
         settings.setValue('text_target_contrast', float(bubble_cfg.get('text_target_contrast', 4.5)))
-        settings.setValue('bubble_text_alpha', int(bubble_cfg.get('bubble_text_alpha', 255)))
-        settings.setValue('bubble_gradient_enabled', bool(bubble_cfg.get('bubble_gradient_enabled', False)))
-        settings.setValue('bubble_gradient_start', list(bubble_cfg.get('bubble_gradient_start', (35, 100, 160))))
-        settings.setValue('bubble_gradient_end', list(bubble_cfg.get('bubble_gradient_end', (200, 220, 255))))
-        settings.setValue('bubble_gradient_angle', float(bubble_cfg.get('bubble_gradient_angle', 90.0)))
+        settings.setValue('background_box_mode', bubble_cfg.get('background_box_mode', 'off'))
+        settings.setValue('background_box_opacity', float(bubble_cfg.get('background_box_opacity', 0.25)))
+        settings.setValue('background_plain_hi', float(bubble_cfg.get('background_plain_hi', 0.95)))
+        settings.setValue('background_plain_lo', float(bubble_cfg.get('background_plain_lo', 0.05)))
+        settings.setValue('flat_variance_threshold', float(bubble_cfg.get('flat_variance_threshold', 8e-4)))
+        settings.setValue('auto_stroke_opacity', float(bubble_cfg.get('auto_stroke_opacity', 0.6)))
         settings.endGroup()
 
         settings.beginGroup("main_page")
@@ -334,41 +335,6 @@ class ProjectController:
         self.main.italic_button.setChecked(settings.value('italic', False, type=bool))
         self.main.underline_button.setChecked(settings.value('underline', False, type=bool))
 
-        bubble_mode = str(settings.value('bubble_mode', 'auto')).lower()
-        if bubble_mode not in {'auto', 'plain', 'translucent'}:
-            bubble_mode = 'auto'
-        raw_rgb = settings.value('bubble_rgb', [35, 100, 160])
-        if isinstance(raw_rgb, str):
-            stripped = raw_rgb.strip().lstrip('[').lstrip('(').rstrip(']').rstrip(')')
-            if stripped.startswith('#') and len(stripped) in (7, 4):
-                try:
-                    hex_value = stripped[1:]
-                    if len(hex_value) == 3:
-                        hex_value = ''.join(ch * 2 for ch in hex_value)
-                    raw_rgb = [int(hex_value[i:i+2], 16) for i in range(0, 6, 2)]
-                except ValueError:
-                    raw_rgb = [35, 100, 160]
-            else:
-                parts = [p.strip() for p in stripped.split(',') if p.strip()]
-                try:
-                    raw_rgb = [int(float(p)) for p in parts[:3]]
-                except ValueError:
-                    raw_rgb = [35, 100, 160]
-        if isinstance(raw_rgb, (list, tuple)):
-            bubble_rgb = tuple(int(v) for v in (list(raw_rgb) + [35, 100, 160])[:3])
-        else:
-            bubble_rgb = (35, 100, 160)
-
-        bubble_min_alpha = int(settings.value('bubble_min_alpha', 110, type=int))
-        bubble_max_alpha = int(settings.value('bubble_max_alpha', 205, type=int))
-        bubble_plain_hi = float(settings.value('bubble_plain_hi', 0.88))
-        bubble_plain_lo = float(settings.value('bubble_plain_lo', 0.12))
-        bubble_flat_var = float(settings.value('bubble_flat_var', 8e-4))
-        bubble_plain_alpha = int(settings.value('bubble_plain_alpha', 230, type=int))
-        text_target_contrast = float(settings.value('text_target_contrast', 4.5))
-        bubble_text_alpha = int(settings.value('bubble_text_alpha', 255, type=int))
-        bubble_gradient_enabled = settings.value('bubble_gradient_enabled', False, type=bool)
-
         def _parse_rgb(value, default):
             if isinstance(value, str):
                 stripped = value.strip().lstrip('[').lstrip('(').rstrip(']').rstrip(')')
@@ -377,7 +343,7 @@ class ProjectController:
                         hex_value = stripped[1:]
                         if len(hex_value) == 3:
                             hex_value = ''.join(ch * 2 for ch in hex_value)
-                        return tuple(int(hex_value[i:i+2], 16) for i in range(0, 6, 2))
+                        return tuple(int(hex_value[i:i + 2], 16) for i in range(0, 6, 2))
                     except ValueError:
                         return default
                 parts = [p.strip() for p in stripped.split(',') if p.strip()]
@@ -389,36 +355,51 @@ class ProjectController:
                 return tuple(int(v) for v in value[:3])
             return default
 
-        gradient_start_raw = settings.value('bubble_gradient_start', list(bubble_rgb))
-        gradient_start = _parse_rgb(gradient_start_raw, bubble_rgb)
-        gradient_end_raw = settings.value('bubble_gradient_end', list(gradient_start))
-        gradient_end = _parse_rgb(gradient_end_raw, gradient_start)
-        gradient_angle = float(settings.value('bubble_gradient_angle', 90.0))
+        bubble_rgb = _parse_rgb(settings.value('bubble_rgb', [35, 100, 160]), (35, 100, 160))
+        text_color_mode = str(settings.value('text_color_mode', 'auto') or 'auto').lower()
+        if text_color_mode not in {'auto', 'black', 'white', 'custom'}:
+            text_color_mode = 'auto'
+        custom_text_rgb = _parse_rgb(settings.value('custom_text_rgb', [0, 0, 0]), (0, 0, 0))
 
-        combo = getattr(self.main, 'bubble_mode_combo', None)
-        if combo is not None:
-            idx = combo.findData(bubble_mode)
-            if idx < 0:
-                idx = combo.findData('auto')
-            if idx >= 0:
-                combo.setCurrentIndex(idx)
+        text_fill_opacity = float(settings.value('text_fill_opacity', 1.0))
+        text_fill_opacity = max(0.0, min(1.0, text_fill_opacity))
+        stroke_enabled = settings.value('stroke_enabled', False, type=bool)
+        stroke_width = float(settings.value('stroke_width', 2.0))
+        stroke_opacity = float(settings.value('stroke_opacity', 1.0))
+        stroke_opacity = max(0.0, min(1.0, stroke_opacity))
+
+        auto_contrast = settings.value('auto_contrast', True, type=bool)
+        text_target_contrast = float(settings.value('text_target_contrast', 4.5))
+
+        background_box_mode = str(settings.value('background_box_mode', 'off') or 'off').lower()
+        if background_box_mode not in {'off', 'auto', 'on'}:
+            background_box_mode = 'off'
+        background_box_opacity = float(settings.value('background_box_opacity', 0.25))
+        background_box_opacity = max(0.0, min(0.3, background_box_opacity))
+
+        background_plain_hi = float(settings.value('background_plain_hi', 0.95))
+        background_plain_lo = float(settings.value('background_plain_lo', 0.05))
+        flat_variance_threshold = float(settings.value('flat_variance_threshold', 4e-4))
+        auto_stroke_opacity = float(settings.value('auto_stroke_opacity', 0.6))
+        auto_stroke_opacity = max(0.0, min(1.0, auto_stroke_opacity))
 
         self.main.bubble_style_config.update(
             {
-                'bubble_mode': bubble_mode,
                 'bubble_rgb': bubble_rgb,
-                'bubble_min_alpha': bubble_min_alpha,
-                'bubble_max_alpha': bubble_max_alpha,
-                'bubble_plain_hi': bubble_plain_hi,
-                'bubble_plain_lo': bubble_plain_lo,
-                'bubble_flat_var': bubble_flat_var,
-                'bubble_plain_alpha': bubble_plain_alpha,
+                'text_color_mode': text_color_mode,
+                'custom_text_rgb': custom_text_rgb,
+                'text_fill_opacity': text_fill_opacity,
+                'stroke_enabled': stroke_enabled,
+                'stroke_width': stroke_width,
+                'stroke_opacity': stroke_opacity,
+                'auto_contrast': auto_contrast,
                 'text_target_contrast': text_target_contrast,
-                'bubble_text_alpha': bubble_text_alpha,
-                'bubble_gradient_enabled': bubble_gradient_enabled,
-                'bubble_gradient_start': gradient_start,
-                'bubble_gradient_end': gradient_end,
-                'bubble_gradient_angle': gradient_angle,
+                'background_box_mode': background_box_mode,
+                'background_box_opacity': background_box_opacity,
+                'background_plain_hi': background_plain_hi,
+                'background_plain_lo': background_plain_lo,
+                'flat_variance_threshold': flat_variance_threshold,
+                'auto_stroke_opacity': auto_stroke_opacity,
             }
         )
 
@@ -432,76 +413,89 @@ class ProjectController:
             color_button.setProperty('selected_color', bubble_hex)
             color_button.blockSignals(False)
 
-        min_spin = getattr(self.main, 'bubble_min_alpha_spin', None)
-        if min_spin is not None:
-            min_spin.blockSignals(True)
-            min_spin.setValue(bubble_min_alpha)
-            min_spin.blockSignals(False)
-        min_slider = getattr(self.main, 'bubble_min_alpha_slider', None)
-        if min_slider is not None:
-            min_slider.blockSignals(True)
-            min_slider.setValue(bubble_min_alpha)
-            min_slider.blockSignals(False)
+        text_color_combo = getattr(self.main, 'text_color_mode_combo', None)
+        if text_color_combo is not None:
+            text_color_combo.blockSignals(True)
+            index = text_color_combo.findData(text_color_mode)
+            if index < 0:
+                index = 0
+            text_color_combo.setCurrentIndex(index)
+            text_color_combo.blockSignals(False)
 
-        max_spin = getattr(self.main, 'bubble_max_alpha_spin', None)
-        if max_spin is not None:
-            max_spin.blockSignals(True)
-            max_spin.setValue(bubble_max_alpha)
-            max_spin.blockSignals(False)
-        max_slider = getattr(self.main, 'bubble_max_alpha_slider', None)
-        if max_slider is not None:
-            max_slider.blockSignals(True)
-            max_slider.setValue(bubble_max_alpha)
-            max_slider.blockSignals(False)
+        custom_button = getattr(self.main, 'custom_text_color_button', None)
+        if custom_button is not None:
+            custom_hex = '#{0:02X}{1:02X}{2:02X}'.format(*custom_text_rgb)
+            custom_button.blockSignals(True)
+            custom_button.setStyleSheet(
+                f"background-color: {custom_hex}; border: none; border-radius: 5px;"
+            )
+            custom_button.setProperty('selected_color', custom_hex)
+            custom_button.blockSignals(False)
 
-        text_spin = getattr(self.main, 'bubble_text_alpha_spin', None)
+        text_opacity_pct = int(round(text_fill_opacity * 100))
+        text_spin = getattr(self.main, 'text_opacity_spin', None)
         if text_spin is not None:
             text_spin.blockSignals(True)
-            text_spin.setValue(bubble_text_alpha)
+            text_spin.setValue(text_opacity_pct)
             text_spin.blockSignals(False)
-        text_slider = getattr(self.main, 'bubble_text_alpha_slider', None)
+        text_slider = getattr(self.main, 'text_opacity_slider', None)
         if text_slider is not None:
             text_slider.blockSignals(True)
-            text_slider.setValue(bubble_text_alpha)
+            text_slider.setValue(text_opacity_pct)
             text_slider.blockSignals(False)
 
-        plain_spin = getattr(self.main, 'bubble_plain_alpha_spin', None)
-        if plain_spin is not None:
-            plain_spin.blockSignals(True)
-            plain_spin.setValue(bubble_plain_alpha)
-            plain_spin.blockSignals(False)
-        plain_slider = getattr(self.main, 'bubble_plain_alpha_slider', None)
-        if plain_slider is not None:
-            plain_slider.blockSignals(True)
-            plain_slider.setValue(bubble_plain_alpha)
-            plain_slider.blockSignals(False)
+        stroke_checkbox = getattr(self.main, 'stroke_checkbox', None)
+        if stroke_checkbox is not None:
+            stroke_checkbox.blockSignals(True)
+            stroke_checkbox.setChecked(stroke_enabled)
+            stroke_checkbox.blockSignals(False)
 
-        gradient_checkbox = getattr(self.main, 'bubble_gradient_checkbox', None)
-        if gradient_checkbox is not None:
-            gradient_checkbox.blockSignals(True)
-            gradient_checkbox.setChecked(bubble_gradient_enabled)
-            gradient_checkbox.blockSignals(False)
-        start_button = getattr(self.main, 'bubble_gradient_start_button', None)
-        if start_button is not None:
-            self.main.text_ctrl._update_gradient_color_button(
-                'bubble_gradient_start_button', QColor(*gradient_start)
-            )
-        end_button = getattr(self.main, 'bubble_gradient_end_button', None)
-        if end_button is not None:
-            self.main.text_ctrl._update_gradient_color_button(
-                'bubble_gradient_end_button', QColor(*gradient_end)
-            )
-        angle_spin = getattr(self.main, 'bubble_gradient_angle_spin', None)
-        if angle_spin is not None:
-            angle_spin.blockSignals(True)
-            angle_spin.setValue(int(round(gradient_angle)))
-            angle_spin.blockSignals(False)
-        angle_slider = getattr(self.main, 'bubble_gradient_angle_slider', None)
-        if angle_slider is not None:
-            angle_slider.blockSignals(True)
-            angle_slider.setValue(int(round(gradient_angle)))
-            angle_slider.blockSignals(False)
-        self.main.text_ctrl._set_gradient_controls_enabled(bubble_gradient_enabled)
+        stroke_width_spin = getattr(self.main, 'stroke_width_spin', None)
+        if stroke_width_spin is not None:
+            stroke_width_spin.blockSignals(True)
+            stroke_width_spin.setValue(int(round(stroke_width)))
+            stroke_width_spin.blockSignals(False)
+
+        stroke_opacity_pct = int(round(stroke_opacity * 100))
+        stroke_opacity_spin = getattr(self.main, 'stroke_opacity_spin', None)
+        if stroke_opacity_spin is not None:
+            stroke_opacity_spin.blockSignals(True)
+            stroke_opacity_spin.setValue(stroke_opacity_pct)
+            stroke_opacity_spin.blockSignals(False)
+        stroke_opacity_slider = getattr(self.main, 'stroke_opacity_slider', None)
+        if stroke_opacity_slider is not None:
+            stroke_opacity_slider.blockSignals(True)
+            stroke_opacity_slider.setValue(stroke_opacity_pct)
+            stroke_opacity_slider.blockSignals(False)
+
+        auto_contrast_checkbox = getattr(self.main, 'auto_contrast_checkbox', None)
+        if auto_contrast_checkbox is not None:
+            auto_contrast_checkbox.blockSignals(True)
+            auto_contrast_checkbox.setChecked(auto_contrast)
+            auto_contrast_checkbox.blockSignals(False)
+
+        box_mode_combo = getattr(self.main, 'background_box_mode_combo', None)
+        if box_mode_combo is not None:
+            box_mode_combo.blockSignals(True)
+            idx = box_mode_combo.findData(background_box_mode)
+            if idx < 0:
+                idx = 0
+            box_mode_combo.setCurrentIndex(idx)
+            box_mode_combo.blockSignals(False)
+
+        box_opacity_pct = int(round(background_box_opacity * 100))
+        box_opacity_pct = max(0, min(30, box_opacity_pct))
+        box_spin = getattr(self.main, 'background_box_opacity_spin', None)
+        if box_spin is not None:
+            box_spin.blockSignals(True)
+            box_spin.setValue(box_opacity_pct)
+            box_spin.blockSignals(False)
+        box_slider = getattr(self.main, 'background_box_opacity_slider', None)
+        if box_slider is not None:
+            box_slider.blockSignals(True)
+            box_slider.setValue(box_opacity_pct)
+            box_slider.blockSignals(False)
+
         settings.endGroup()
 
     def process_group(self, group_key, group_value, settings_obj: QSettings):

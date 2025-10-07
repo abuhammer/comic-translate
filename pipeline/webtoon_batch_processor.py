@@ -775,40 +775,32 @@ class WebtoonBatchProcessor:
         direction = render_settings.direction
         auto_font_color = getattr(render_settings, 'auto_font_color', True)
 
-        bubble_mode = getattr(render_settings, 'bubble_mode', 'auto')
         bubble_rgb = getattr(render_settings, 'bubble_rgb', (35, 100, 160))
         if isinstance(bubble_rgb, (list, tuple)):
             bubble_rgb = tuple(int(v) for v in bubble_rgb[:3])
         else:
             bubble_rgb = (35, 100, 160)
-        bubble_min_alpha = int(getattr(render_settings, 'bubble_min_alpha', 110))
-        bubble_max_alpha = int(getattr(render_settings, 'bubble_max_alpha', 205))
-        bubble_plain_hi = float(getattr(render_settings, 'bubble_plain_hi', 0.88))
-        bubble_plain_lo = float(getattr(render_settings, 'bubble_plain_lo', 0.12))
-        bubble_flat_var = float(getattr(render_settings, 'bubble_flat_var', 8e-4))
-        bubble_plain_alpha = int(getattr(render_settings, 'bubble_plain_alpha', 230))
+
+        text_color_mode = getattr(render_settings, 'text_color_mode', 'auto')
+        custom_text_rgb = getattr(render_settings, 'custom_text_rgb', (0, 0, 0))
+        if isinstance(custom_text_rgb, (list, tuple)):
+            custom_text_rgb = tuple(int(v) for v in custom_text_rgb[:3])
+        else:
+            custom_text_rgb = (0, 0, 0)
+
+        text_fill_opacity = getattr(render_settings, 'text_fill_opacity', 1.0)
+        stroke_enabled = bool(getattr(render_settings, 'stroke_enabled', False))
+        stroke_width = float(getattr(render_settings, 'stroke_width', outline_width))
+        stroke_opacity = getattr(render_settings, 'stroke_opacity', 1.0)
+        auto_contrast = bool(getattr(render_settings, 'auto_contrast', True))
         text_target_contrast = float(getattr(render_settings, 'text_target_contrast', 4.5))
-        bubble_text_alpha = int(getattr(render_settings, 'bubble_text_alpha', 255))
-        bubble_gradient_enabled = bool(
-            getattr(render_settings, 'bubble_gradient_enabled', False)
-        )
-        bubble_gradient_start = getattr(
-            render_settings, 'bubble_gradient_start', bubble_rgb
-        )
-        if isinstance(bubble_gradient_start, (list, tuple)):
-            bubble_gradient_start = tuple(int(v) for v in bubble_gradient_start[:3])
-        else:
-            bubble_gradient_start = bubble_rgb
-        bubble_gradient_end = getattr(
-            render_settings, 'bubble_gradient_end', bubble_gradient_start
-        )
-        if isinstance(bubble_gradient_end, (list, tuple)):
-            bubble_gradient_end = tuple(int(v) for v in bubble_gradient_end[:3])
-        else:
-            bubble_gradient_end = bubble_gradient_start
-        bubble_gradient_angle = float(
-            getattr(render_settings, 'bubble_gradient_angle', 90.0)
-        )
+
+        background_box_mode = getattr(render_settings, 'background_box_mode', 'off')
+        background_box_opacity = getattr(render_settings, 'background_box_opacity', 0.25)
+        bubble_plain_hi = float(getattr(render_settings, 'background_plain_hi', 0.95))
+        bubble_plain_lo = float(getattr(render_settings, 'background_plain_lo', 0.05))
+        bubble_flat_var = float(getattr(render_settings, 'flat_variance_threshold', 4e-4))
+        auto_stroke_opacity = getattr(render_settings, 'auto_stroke_opacity', 0.6)
 
         backgrounds = self.virtual_page_backgrounds.get(vpage.virtual_id, [])
         background_image = None
@@ -858,20 +850,21 @@ class WebtoonBatchProcessor:
                         background_image,
                         blk_virtual,
                         bubble_rgb=bubble_rgb,
-                        min_alpha=bubble_min_alpha,
-                        max_alpha=bubble_max_alpha,
+                        background_box_mode=background_box_mode,
+                        background_box_opacity=background_box_opacity,
+                        text_color_mode=text_color_mode,
+                        custom_text_rgb=custom_text_rgb,
+                        text_opacity=text_fill_opacity,
+                        stroke_enabled=stroke_enabled,
+                        stroke_width=stroke_width,
+                        stroke_opacity=stroke_opacity,
+                        auto_contrast=auto_contrast,
                         text_min_contrast=text_target_contrast,
-                        bubble_mode=bubble_mode,
-                        plain_alpha=bubble_plain_alpha,
-                        plain_thresh_hi=bubble_plain_hi,
-                        plain_thresh_lo=bubble_plain_lo,
-                        flat_var=bubble_flat_var,
-                        text_alpha=bubble_text_alpha,
-                        gradient_enabled=bubble_gradient_enabled,
-                            gradient_start=bubble_gradient_start,
-                            gradient_end=bubble_gradient_end,
-                            gradient_angle=bubble_gradient_angle,
-                        )
+                        background_plain_hi=bubble_plain_hi,
+                        background_plain_lo=bubble_plain_lo,
+                        flat_variance_threshold=bubble_flat_var,
+                        auto_stroke_opacity=auto_stroke_opacity,
+                    )
                 except Exception:
                     logger.exception("Dynamic bubble styling failed for virtual page %s", vpage.virtual_id)
                     bubble_style_obj = None
@@ -887,10 +880,16 @@ class WebtoonBatchProcessor:
                 text_rgb = bubble_style_obj.text_rgb
                 outline_rgb = bubble_style_obj.outline_rgb
                 text_hex = f"#{text_rgb[0]:02X}{text_rgb[1]:02X}{text_rgb[2]:02X}"
-                outline_hex = f"#{outline_rgb[0]:02X}{outline_rgb[1]:02X}{outline_rgb[2]:02X}"
                 blk_virtual.font_color = text_hex
                 blk_virtual.font_alpha = int(bubble_style_obj.text_alpha)
-                blk_virtual.outline_color = outline_hex
+                outline_alpha = int(bubble_style_obj.outline_alpha)
+                blk_virtual.outline_alpha = outline_alpha
+                if outline_alpha > 0 and bubble_style_obj.outline_width > 0:
+                    blk_virtual.outline_color = (
+                        f"#{outline_alpha:02X}{outline_rgb[0]:02X}{outline_rgb[1]:02X}{outline_rgb[2]:02X}"
+                    )
+                else:
+                    blk_virtual.outline_color = ''
                 blk_virtual.outline_width = bubble_style_obj.outline_width
                 text_color = QColor(
                     int(text_rgb[0]),
@@ -898,7 +897,15 @@ class WebtoonBatchProcessor:
                     int(text_rgb[2]),
                     int(bubble_style_obj.text_alpha),
                 )
-                outline_color = QColor(*outline_rgb)
+                if outline_alpha > 0:
+                    outline_color = QColor(
+                        int(outline_rgb[0]),
+                        int(outline_rgb[1]),
+                        int(outline_rgb[2]),
+                        outline_alpha,
+                    )
+                else:
+                    outline_color = QColor(*outline_rgb)
                 effective_outline_width = bubble_style_obj.outline_width
             else:
                 if auto_font_color and self.text_color_classifier and background_image is not None:

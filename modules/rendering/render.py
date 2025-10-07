@@ -46,20 +46,21 @@ class TextRenderingSettings:
     line_spacing: str
     direction: Qt.LayoutDirection
     auto_font_color: bool = True
-    bubble_mode: str = "auto"
-    bubble_rgb: Tuple[int, int, int] = (35, 100, 160)
-    bubble_min_alpha: int = 110
-    bubble_max_alpha: int = 205
-    bubble_plain_hi: float = 0.88
-    bubble_plain_lo: float = 0.12
-    bubble_flat_var: float = 8e-4
-    bubble_plain_alpha: int = 230
+    text_color_mode: str = "auto"
+    custom_text_rgb: Tuple[int, int, int] = (0, 0, 0)
+    text_fill_opacity: float = 1.0
+    stroke_enabled: bool = False
+    stroke_width: float = 2.0
+    stroke_opacity: float = 1.0
+    auto_contrast: bool = True
     text_target_contrast: float = 4.5
-    bubble_text_alpha: int = 255
-    bubble_gradient_enabled: bool = False
-    bubble_gradient_start: Tuple[int, int, int] = (35, 100, 160)
-    bubble_gradient_end: Tuple[int, int, int] = (200, 220, 255)
-    bubble_gradient_angle: float = 90.0
+    background_box_mode: str = "off"
+    background_box_opacity: float = 0.25
+    bubble_rgb: Tuple[int, int, int] = (35, 100, 160)
+    background_plain_hi: float = 0.95
+    background_plain_lo: float = 0.05
+    flat_variance_threshold: float = 4e-4
+    auto_stroke_opacity: float = 0.6
 
 def array_to_pil(rgb_image: np.ndarray):
     # Image is already in RGB format, just convert to PIL
@@ -349,38 +350,30 @@ def manual_wrap(
     init_font_size = render_settings.max_font_size
     min_font_size = render_settings.min_font_size
 
-    bubble_mode = getattr(render_settings, "bubble_mode", "auto")
     bubble_rgb = getattr(render_settings, "bubble_rgb", (35, 100, 160))
     if isinstance(bubble_rgb, (list, tuple)):
         bubble_rgb = tuple(int(v) for v in bubble_rgb[:3])
     else:
         bubble_rgb = (35, 100, 160)
-    bubble_min_alpha = int(getattr(render_settings, "bubble_min_alpha", 110))
-    bubble_max_alpha = int(getattr(render_settings, "bubble_max_alpha", 205))
-    bubble_plain_hi = float(getattr(render_settings, "bubble_plain_hi", 0.88))
-    bubble_plain_lo = float(getattr(render_settings, "bubble_plain_lo", 0.12))
-    bubble_flat_var = float(getattr(render_settings, "bubble_flat_var", 8e-4))
-    bubble_plain_alpha = int(getattr(render_settings, "bubble_plain_alpha", 230))
+
+    text_color_mode = getattr(render_settings, "text_color_mode", "auto")
+    custom_text_rgb = getattr(render_settings, "custom_text_rgb", (0, 0, 0))
+    if isinstance(custom_text_rgb, (list, tuple)):
+        custom_text_rgb = tuple(int(v) for v in custom_text_rgb[:3])
+    else:
+        custom_text_rgb = (0, 0, 0)
+    text_fill_opacity = getattr(render_settings, "text_fill_opacity", 1.0)
+    stroke_enabled = bool(getattr(render_settings, "stroke_enabled", False))
+    stroke_width = float(getattr(render_settings, "stroke_width", outline_width))
+    stroke_opacity = getattr(render_settings, "stroke_opacity", 1.0)
+    auto_contrast = bool(getattr(render_settings, "auto_contrast", True))
     text_target_contrast = float(getattr(render_settings, "text_target_contrast", 4.5))
-    bubble_text_alpha = int(getattr(render_settings, "bubble_text_alpha", 255))
-    bubble_gradient_enabled = bool(
-        getattr(render_settings, "bubble_gradient_enabled", False)
-    )
-    bubble_gradient_start = getattr(
-        render_settings, "bubble_gradient_start", bubble_rgb
-    )
-    if isinstance(bubble_gradient_start, (list, tuple)):
-        bubble_gradient_start = tuple(int(v) for v in bubble_gradient_start[:3])
-    else:
-        bubble_gradient_start = bubble_rgb
-    bubble_gradient_end = getattr(render_settings, "bubble_gradient_end", bubble_rgb)
-    if isinstance(bubble_gradient_end, (list, tuple)):
-        bubble_gradient_end = tuple(int(v) for v in bubble_gradient_end[:3])
-    else:
-        bubble_gradient_end = bubble_gradient_start
-    bubble_gradient_angle = float(
-        getattr(render_settings, "bubble_gradient_angle", 90.0)
-    )
+    background_box_mode = getattr(render_settings, "background_box_mode", "off")
+    background_box_opacity = getattr(render_settings, "background_box_opacity", 0.25)
+    background_plain_hi = float(getattr(render_settings, "background_plain_hi", 0.95))
+    background_plain_lo = float(getattr(render_settings, "background_plain_lo", 0.05))
+    flat_variance_threshold = float(getattr(render_settings, "flat_variance_threshold", 4e-4))
+    auto_stroke_opacity = getattr(render_settings, "auto_stroke_opacity", 0.6)
 
     for blk in blk_list:
         x1, y1, width, height = blk.xywh
@@ -399,19 +392,20 @@ def manual_wrap(
                     background_image,
                     blk,
                     bubble_rgb=bubble_rgb,
-                    min_alpha=bubble_min_alpha,
-                    max_alpha=bubble_max_alpha,
+                    background_box_mode=background_box_mode,
+                    background_box_opacity=background_box_opacity,
+                    text_color_mode=text_color_mode,
+                    custom_text_rgb=custom_text_rgb,
+                    text_opacity=text_fill_opacity,
+                    stroke_enabled=stroke_enabled,
+                    stroke_width=stroke_width,
+                    stroke_opacity=stroke_opacity,
+                    auto_contrast=auto_contrast,
                     text_min_contrast=text_target_contrast,
-                    bubble_mode=bubble_mode,
-                    plain_alpha=bubble_plain_alpha,
-                    plain_thresh_hi=bubble_plain_hi,
-                    plain_thresh_lo=bubble_plain_lo,
-                    flat_var=bubble_flat_var,
-                    text_alpha=bubble_text_alpha,
-                    gradient_enabled=bubble_gradient_enabled,
-                    gradient_start=bubble_gradient_start,
-                    gradient_end=bubble_gradient_end,
-                    gradient_angle=bubble_gradient_angle,
+                    background_plain_hi=background_plain_hi,
+                    background_plain_lo=background_plain_lo,
+                    flat_variance_threshold=flat_variance_threshold,
+                    auto_stroke_opacity=auto_stroke_opacity,
                 )
             except Exception:
                 bubble_style_obj = None
@@ -424,7 +418,14 @@ def manual_wrap(
             outline_rgb = bubble_style_obj.outline_rgb
             blk.font_color = f"#{text_rgb[0]:02X}{text_rgb[1]:02X}{text_rgb[2]:02X}"
             blk.font_alpha = int(bubble_style_obj.text_alpha)
-            blk.outline_color = f"#{outline_rgb[0]:02X}{outline_rgb[1]:02X}{outline_rgb[2]:02X}"
+            outline_alpha = int(bubble_style_obj.outline_alpha)
+            blk.outline_alpha = outline_alpha
+            if outline_alpha > 0 and bubble_style_obj.outline_width > 0:
+                blk.outline_color = (
+                    f"#{outline_alpha:02X}{outline_rgb[0]:02X}{outline_rgb[1]:02X}{outline_rgb[2]:02X}"
+                )
+            else:
+                blk.outline_color = ''
             blk.outline_width = bubble_style_obj.outline_width
         else:
             if auto_font_color and classifier and background_image is not None:

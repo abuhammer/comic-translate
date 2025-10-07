@@ -1,4 +1,4 @@
-"""Dynamic speech bubble styling utilities."""
+"""Dynamic text styling utilities for adaptive speech overlays."""
 
 from __future__ import annotations
 
@@ -18,12 +18,13 @@ RgbaTuple = Tuple[int, int, int, int]
 
 @dataclass
 class BubbleRenderStyle:
-    """Container describing how to draw a translated speech bubble."""
+    """Container describing how to draw translated text with optional background box."""
 
     fill_rgba: RgbaTuple
     text_rgb: RgbTuple
     text_alpha: int
     outline_rgb: RgbTuple
+    outline_alpha: int
     outline_width: float
     shadow_rgba: Optional[RgbaTuple]
     shadow_offset: Tuple[float, float]
@@ -38,6 +39,7 @@ class BubbleRenderStyle:
             "text_rgb": tuple(self.text_rgb),
             "text_alpha": int(self.text_alpha),
             "outline_rgb": tuple(self.outline_rgb),
+            "outline_alpha": int(self.outline_alpha),
             "outline_width": float(self.outline_width),
             "shadow_rgba": tuple(self.shadow_rgba) if self.shadow_rgba else None,
             "shadow_offset": tuple(self.shadow_offset),
@@ -86,15 +88,6 @@ def _relative_luminance(rgb: np.ndarray | Iterable[float]) -> float:
     return float(0.2126 * r + 0.7152 * g + 0.0722 * b)
 
 
-def _relative_luminance_srgb(rgb: np.ndarray) -> np.ndarray:
-    linear = _srgb_to_linear(rgb)
-    return (
-        0.2126 * linear[..., 0]
-        + 0.7152 * linear[..., 1]
-        + 0.0722 * linear[..., 2]
-    )
-
-
 def _mean_variance_patch(image: np.ndarray, bbox: Tuple[int, int, int, int]):
     x0, y0, x1, y1 = bbox
     patch = image[y0:y1, x0:x1]
@@ -103,36 +96,20 @@ def _mean_variance_patch(image: np.ndarray, bbox: Tuple[int, int, int, int]):
 
     patch_float = patch.astype(np.float32)
     mean_rgb = patch_float.reshape(-1, patch.shape[-1]).mean(axis=0)
-    luminance = _relative_luminance_srgb(patch_float)
+    luminance = _srgb_to_linear(patch_float)
+    luminance = (
+        0.2126 * luminance[..., 0]
+        + 0.7152 * luminance[..., 1]
+        + 0.0722 * luminance[..., 2]
+    )
     mean_lum = float(luminance.mean()) if luminance.size else 0.5
     variance = float(luminance.var()) if luminance.size else 0.0
     return mean_rgb, mean_lum, variance
 
 
-def _blend_over(bg_rgb: np.ndarray, fg_rgba: Sequence[int]) -> np.ndarray:
-    bg_rgb = np.asarray(bg_rgb, dtype=np.float32)
-    fr, fg, fb, fa = fg_rgba
-    alpha = fa / 255.0
-    blended = np.array(
-        [
-            fr * alpha + bg_rgb[0] * (1.0 - alpha),
-            fg * alpha + bg_rgb[1] * (1.0 - alpha),
-            fb * alpha + bg_rgb[2] * (1.0 - alpha),
-        ],
-        dtype=np.float32,
-    )
-    return blended
-
-
-def _contrast_ratio(l1: float, l2: float) -> float:
-    bright, dark = max(l1, l2), min(l1, l2)
-    return (bright + 0.05) / (dark + 0.05)
-
-
 def _clip_rgb(rgb: np.ndarray | Sequence[float]) -> np.ndarray:
     arr = np.asarray(rgb, dtype=np.float32)
-    arr = np.clip(arr, 0.0, 255.0)
-    return arr
+    return np.clip(arr, 0.0, 255.0)
 
 
 def _as_int_tuple(values: np.ndarray | Sequence[float]) -> Tuple[int, int, int]:
@@ -160,200 +137,9 @@ def _normalise_padding(padding: Sequence[float] | float, scale: float) -> Tuple[
     return value, value, value, value
 
 
-def _select_text_rgb(
-    bubble_over_rgb: np.ndarray, text_min_contrast: float
-) -> Tuple[RgbTuple, float, str]:
-    """Pick a text colour with sufficient contrast against the blended bubble."""
-
-    candidates = [
-        np.array([255.0, 255.0, 255.0], dtype=np.float32),
-        np.array([0.0, 0.0, 0.0], dtype=np.float32),
-        255.0 - bubble_over_rgb,
-    ]
-    best_rgb = candidates[0]
-    best_ratio = -1.0
-    result_reason = "dynamic"
-    bubble_lum = _relative_luminance(_srgb_to_linear(bubble_over_rgb))
-
-    for cand in candidates:
-        cand_lum = _relative_luminance(_srgb_to_linear(cand))
-        ratio = _contrast_ratio(bubble_lum, cand_lum)
-        if ratio > best_ratio:
-            best_ratio = ratio
-            best_rgb = cand
-        if ratio >= text_min_contrast:
-            best_rgb = cand
-            best_ratio = ratio
-            break
-
-    if best_ratio < text_min_contrast:
-        result_reason = f"dynamic_low_contrast_{best_ratio:.2f}"
-
-    return _as_int_tuple(best_rgb), best_ratio, result_reason
-
-
-def _boost_alpha_for_light_text(
-    mean_rgb: np.ndarray,
-    bubble_rgb: np.ndarray,
-    start_alpha: int,
-    max_alpha: int,
-    text_min_contrast: float,
-) -> Tuple[int, Optional[np.ndarray]]:
-    """Increase alpha so white text can meet the contrast target."""
-
-    max_alpha = int(np.clip(max_alpha, 0, 255))
-    start_alpha = int(np.clip(start_alpha, 0, max_alpha))
-    if max_alpha <= start_alpha:
-        return start_alpha, None
-
-    white_lum = 1.0  # Relative luminance of sRGB white
-
-    best_alpha = start_alpha
-    best_blend = None
-    low = start_alpha
-    high = max_alpha
-    satisfied = False
-
-    while low <= high:
-        mid = (low + high) // 2
-        candidate_rgba = (*_as_int_tuple(bubble_rgb), int(mid))
-        blended = _blend_over(mean_rgb, candidate_rgba)
-        bubble_lum = _relative_luminance(_srgb_to_linear(blended))
-        ratio = _contrast_ratio(bubble_lum, white_lum)
-
-        if ratio >= text_min_contrast:
-            satisfied = True
-            best_alpha = mid
-            best_blend = blended
-            high = mid - 1
-        else:
-            low = mid + 1
-
-    if not satisfied:
-        return start_alpha, None
-    return best_alpha, best_blend
-
-
-def _choose_fill_and_text(
-    mean_rgb: np.ndarray,
-    mean_lum: float,
-    variance: float,
-    bubble_rgb: Sequence[int],
-    dynamic_alpha: int,
-    bubble_mode: str,
-    plain_alpha: int,
-    plain_thresh_hi: float,
-    plain_thresh_lo: float,
-    flat_var: float,
-    text_min_contrast: float,
-) -> Tuple[RgbaTuple, RgbTuple, float, str, np.ndarray]:
-    """Select bubble fill, text colour, and contrast telemetry."""
-
-    bubble_mode_normalised = (bubble_mode or "auto").lower()
-    enable_plain_shortcuts = bubble_mode_normalised == "auto"
-
-    bubble_rgb_arr = np.asarray(bubble_rgb, dtype=np.float32)
-    bubble_rgba_dynamic = (*_as_int_tuple(bubble_rgb_arr), int(dynamic_alpha))
-    bubble_lum = _relative_luminance(_srgb_to_linear(bubble_rgb_arr))
-
-    if bubble_mode_normalised == "plain":
-        fill_rgba = (*_as_int_tuple(bubble_rgb_arr), int(plain_alpha))
-        bubble_over = _blend_over(mean_rgb, fill_rgba)
-        text_rgb = (0, 0, 0) if bubble_lum >= 0.5 else (255, 255, 255)
-        text_lum = _relative_luminance(_srgb_to_linear(np.array(text_rgb, dtype=np.float32)))
-        bubble_lum_post = _relative_luminance(_srgb_to_linear(bubble_over))
-        contrast = _contrast_ratio(text_lum, bubble_lum_post)
-        return fill_rgba, text_rgb, contrast, "plain_mode", bubble_over
-
-    if enable_plain_shortcuts and dynamic_alpha >= 210:
-        if bubble_lum >= plain_thresh_hi:
-            bubble_over = _blend_over(mean_rgb, bubble_rgba_dynamic)
-            text_rgb = (0, 0, 0)
-            text_lum = _relative_luminance(_srgb_to_linear(np.array(text_rgb, dtype=np.float32)))
-            contrast = _contrast_ratio(
-                text_lum, _relative_luminance(_srgb_to_linear(bubble_over))
-            )
-            return bubble_rgba_dynamic, text_rgb, contrast, "forced_black_on_white_bubble", bubble_over
-        if bubble_lum <= plain_thresh_lo:
-            bubble_over = _blend_over(mean_rgb, bubble_rgba_dynamic)
-            text_rgb = (255, 255, 255)
-            text_lum = _relative_luminance(_srgb_to_linear(np.array(text_rgb, dtype=np.float32)))
-            contrast = _contrast_ratio(
-                text_lum, _relative_luminance(_srgb_to_linear(bubble_over))
-            )
-            return bubble_rgba_dynamic, text_rgb, contrast, "forced_white_on_black_bubble", bubble_over
-        if bubble_lum > 0.5:
-            bubble_over = _blend_over(mean_rgb, bubble_rgba_dynamic)
-            text_rgb = (0, 0, 0)
-            text_lum = _relative_luminance(_srgb_to_linear(np.array(text_rgb, dtype=np.float32)))
-            contrast = _contrast_ratio(
-                text_lum, _relative_luminance(_srgb_to_linear(bubble_over))
-            )
-            return bubble_rgba_dynamic, text_rgb, contrast, "opaque_mid_bubble", bubble_over
-        bubble_over = _blend_over(mean_rgb, bubble_rgba_dynamic)
-        text_rgb = (255, 255, 255)
-        text_lum = _relative_luminance(_srgb_to_linear(np.array(text_rgb, dtype=np.float32)))
-        contrast = _contrast_ratio(
-            text_lum, _relative_luminance(_srgb_to_linear(bubble_over))
-        )
-        return bubble_rgba_dynamic, text_rgb, contrast, "opaque_mid_bubble", bubble_over
-
-    if enable_plain_shortcuts and variance < flat_var:
-        if mean_lum >= plain_thresh_hi or mean_lum <= plain_thresh_lo:
-            boosted_alpha = int(
-                np.clip(
-                    max(dynamic_alpha, min(plain_alpha, 240)),
-                    dynamic_alpha,
-                    255,
-                )
-            )
-            fill_rgba = (*_as_int_tuple(bubble_rgb_arr), boosted_alpha)
-            bubble_over = _blend_over(mean_rgb, fill_rgba)
-            text_rgb, contrast, reason = _select_text_rgb(bubble_over, text_min_contrast)
-            lightness_tag = "light" if mean_lum >= plain_thresh_hi else "dark"
-            return (
-                fill_rgba,
-                text_rgb,
-                contrast,
-                f"dynamic_plain_bg_{lightness_tag}",
-                bubble_over,
-            )
-
-    bubble_over = _blend_over(mean_rgb, bubble_rgba_dynamic)
-    text_rgb, contrast, reason = _select_text_rgb(bubble_over, text_min_contrast)
-
-    prefer_light_text = bubble_lum <= 0.38
-    if (
-        bubble_mode_normalised in {"auto", "translucent"}
-        and prefer_light_text
-        and text_rgb == (0, 0, 0)
-    ):
-        alpha_ceiling = int(
-            np.clip(max(plain_alpha, dynamic_alpha), dynamic_alpha, 255)
-        )
-        boosted_alpha, boosted_blend = _boost_alpha_for_light_text(
-            mean_rgb,
-            bubble_rgb_arr,
-            dynamic_alpha,
-            alpha_ceiling,
-            text_min_contrast,
-        )
-        if boosted_alpha > dynamic_alpha:
-            bubble_rgba_dynamic = (
-                *_as_int_tuple(bubble_rgb_arr),
-                int(boosted_alpha),
-            )
-            bubble_over = (
-                boosted_blend
-                if boosted_blend is not None
-                else _blend_over(mean_rgb, bubble_rgba_dynamic)
-            )
-            text_rgb, contrast, reason = _select_text_rgb(
-                bubble_over, text_min_contrast
-            )
-            reason = "dynamic_boosted_light_text"
-
-    return bubble_rgba_dynamic, text_rgb, contrast, reason, bubble_over
+def _contrast_ratio(l1: float, l2: float) -> float:
+    bright, dark = max(l1, l2), min(l1, l2)
+    return (bright + 0.05) / (dark + 0.05)
 
 
 def _extract_bbox(candidate: Optional[Sequence[float]]) -> Optional[Tuple[float, float, float, float]]:
@@ -373,28 +159,34 @@ def _extract_bbox(candidate: Optional[Sequence[float]]) -> Optional[Tuple[float,
     return x0, y0, x1, y1
 
 
+def _normalise_ratio_value(value: float) -> float:
+    value = float(value)
+    if value > 1.0:
+        value /= 255.0
+    return float(np.clip(value, 0.0, 1.0))
+
+
 def compute_dynamic_bubble_style(
     image: np.ndarray,
     blk: TextBlock,
+    *,
     bubble_rgb: Sequence[int] = (35, 100, 160),
-    min_alpha: int = 110,
-    max_alpha: int = 205,
-    corner_radius_factor: float = 0.18,
-    padding: Sequence[float] | float = (12.0, 8.0),
+    background_box_mode: str = "off",
+    background_box_opacity: float = 0.25,
+    text_color_mode: str = "auto",
+    custom_text_rgb: Optional[Sequence[int]] = None,
+    text_opacity: float = 1.0,
+    stroke_enabled: bool = False,
+    stroke_width: float = 2.0,
+    stroke_opacity: float = 1.0,
+    auto_contrast: bool = True,
     text_min_contrast: float = 4.5,
-    max_variance_reference: float = 0.04,
-    bubble_mode: str = "auto",
-    plain_alpha: int = 230,
-    plain_thresh_hi: float = 0.88,
-    plain_thresh_lo: float = 0.12,
-    flat_var: float = 8e-4,
-    text_alpha: Optional[int] = None,
-    gradient_enabled: bool = False,
-    gradient_start: Optional[Sequence[int]] = None,
-    gradient_end: Optional[Sequence[int]] = None,
-    gradient_angle: float = 90.0,
+    background_plain_hi: float = 0.95,
+    background_plain_lo: float = 0.05,
+    flat_variance_threshold: float = 4e-4,
+    auto_stroke_opacity: float = 0.6,
 ) -> Optional[BubbleRenderStyle]:
-    """Compute a dynamic bubble style for a translated text block."""
+    """Compute the adaptive text styling for a block using local background samples."""
 
     if image is None or blk is None:
         return None
@@ -409,123 +201,162 @@ def compute_dynamic_bubble_style(
     if bbox is None:
         return None
 
-    min_alpha = int(np.clip(min_alpha, 0, 255))
-    max_alpha = int(np.clip(max(max_alpha, min_alpha), 0, 255))
-    plain_alpha = int(np.clip(plain_alpha, 0, 255))
-
     mean_rgb, mean_lum, variance = _mean_variance_patch(image, bbox)
-
-    var_clamped = float(np.clip(variance, 0.0, max_variance_reference))
-    t = var_clamped / max_variance_reference if max_variance_reference > 0 else 1.0
-    alpha = int(round(min_alpha + (max_alpha - min_alpha) * t))
-    alpha = int(np.clip(alpha, min_alpha, max_alpha))
-
-    mode_lower = (bubble_mode or "auto").lower()
-    if mode_lower == "translucent":
-        translucent_floor = int(np.clip(0.75 * max_alpha, min_alpha, 255))
-        alpha = max(alpha, translucent_floor)
-        alpha = int(np.clip(max(alpha, min(plain_alpha, 245)), min_alpha, 255))
-
-    base_rgb = np.asarray(bubble_rgb, dtype=np.float32)
     mean_rgb = np.asarray(mean_rgb, dtype=np.float32)
+    lum_std = float(np.sqrt(max(variance, 0.0)))
+    flat_std_threshold = float(np.sqrt(max(flat_variance_threshold, 0.0)))
 
-    adjust = np.array([20.0 if mean_rgb[0] > base_rgb[0] else -20.0, 0.0, 0.0], dtype=np.float32)
-    adjust[1] = 12.0 if mean_rgb[1] < base_rgb[1] else -12.0
-    adjusted_rgb = _clip_rgb(base_rgb + adjust)
-    adjusted_rgb_tuple = _as_int_tuple(adjusted_rgb)
+    mode = (text_color_mode or "auto").lower()
+    reason = "auto"
+    plain_background: Optional[str] = None
+    auto_stroke_required = False
 
-    fill_rgba, text_rgb, contrast, reason, blended_rgb = _choose_fill_and_text(
-        mean_rgb,
-        mean_lum,
-        variance,
-        adjusted_rgb_tuple,
-        alpha,
-        bubble_mode,
-        plain_alpha,
-        plain_thresh_hi,
-        plain_thresh_lo,
-        flat_var,
-        text_min_contrast,
-    )
+    def _to_rgb_tuple(candidate: Optional[Sequence[int]], fallback: Tuple[int, int, int]) -> Tuple[int, int, int]:
+        if candidate is None:
+            return fallback
+        arr = np.asarray(candidate, dtype=np.float32)
+        if arr.size < 3:
+            return fallback
+        return _as_int_tuple(arr[:3])
 
-    blended_lum = _relative_luminance(_srgb_to_linear(blended_rgb))
-    text_linear = _relative_luminance(
+    if mode == "black":
+        text_rgb = (0, 0, 0)
+        reason = "user_black"
+    elif mode == "white":
+        text_rgb = (255, 255, 255)
+        reason = "user_white"
+    elif mode == "custom":
+        text_rgb = _to_rgb_tuple(custom_text_rgb, (0, 0, 0))
+        reason = "user_custom"
+    else:
+        is_plain_white = mean_lum >= background_plain_hi and lum_std <= flat_std_threshold
+        is_plain_black = mean_lum <= background_plain_lo and lum_std <= flat_std_threshold
+
+        if auto_contrast and is_plain_white:
+            text_rgb = (0, 0, 0)
+            reason = "plain_white_bg"
+            plain_background = "white"
+        elif auto_contrast and is_plain_black:
+            text_rgb = (255, 255, 255)
+            reason = "plain_black_bg"
+            plain_background = "black"
+        elif auto_contrast:
+            candidates = [((0, 0, 0), "black"), ((255, 255, 255), "white")]
+            best_ratio = -1.0
+            best_color = (0, 0, 0)
+            best_label = "black"
+            for cand_rgb, label in candidates:
+                cand_lum = _relative_luminance(
+                    _srgb_to_linear(np.array(cand_rgb, dtype=np.float32))
+                )
+                ratio = _contrast_ratio(mean_lum, cand_lum)
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best_color = cand_rgb
+                    best_label = label
+                if ratio >= text_min_contrast:
+                    best_color = cand_rgb
+                    best_ratio = ratio
+                    best_label = label
+                    break
+
+            text_rgb = best_color
+            if best_ratio >= text_min_contrast:
+                reason = f"dynamic_{best_label}"
+            else:
+                reason = f"dynamic_low_contrast_{best_ratio:.2f}"
+                auto_stroke_required = True
+        else:
+            text_rgb = (0, 0, 0)
+            reason = "auto_contrast_disabled"
+
+    text_opacity = _normalise_ratio_value(text_opacity)
+    text_alpha_value = int(np.clip(round(text_opacity * 255.0), 0, 255))
+
+    stroke_color = (255, 255, 255) if text_rgb == (0, 0, 0) else (0, 0, 0)
+    stroke_active = bool(stroke_enabled)
+    if plain_background == "white":
+        stroke_color = (255, 255, 255)
+        stroke_active = stroke_active or auto_contrast
+    elif plain_background == "black":
+        stroke_color = (0, 0, 0)
+        stroke_active = stroke_active or auto_contrast
+
+    if auto_stroke_required:
+        stroke_active = True
+        stroke_color = (255, 255, 255) if text_rgb == (0, 0, 0) else (0, 0, 0)
+
+    stroke_opacity = _normalise_ratio_value(stroke_opacity)
+    auto_stroke_opacity = _normalise_ratio_value(auto_stroke_opacity)
+
+    if stroke_active:
+        if auto_stroke_required or plain_background:
+            base_opacity = auto_stroke_opacity
+        else:
+            base_opacity = stroke_opacity
+        if plain_background and not auto_stroke_required:
+            base_opacity = min(base_opacity, auto_stroke_opacity)
+        stroke_alpha_value = int(np.clip(round(base_opacity * 255.0), 0, 255))
+    else:
+        stroke_alpha_value = 0
+
+    outline_width = float(stroke_width) if stroke_alpha_value > 0 else 0.0
+
+    bg_lum = _relative_luminance(_srgb_to_linear(mean_rgb))
+    text_lum = _relative_luminance(
         _srgb_to_linear(np.array(text_rgb, dtype=np.float32))
     )
-    outline_target = (0, 0, 0) if text_linear > blended_lum else (255, 255, 255)
-    outline_rgb = outline_target
+    contrast_ratio = _contrast_ratio(bg_lum, text_lum)
 
-    outline_width = 2.0 if fill_rgba[3] >= 150 else 3.0
+    fill_rgba: RgbaTuple = (0, 0, 0, 0)
+    background_mode = (background_box_mode or "off").lower()
+    opacity_cap = float(np.clip(background_box_opacity, 0.0, 0.3))
+    bubble_rgb_tuple = _as_int_tuple(bubble_rgb)
 
-    shadow_alpha = 120 if text_linear >= blended_lum else 90
-    shadow_rgb = (0, 0, 0) if text_linear >= blended_lum else (255, 255, 255)
-    shadow_rgba = (*shadow_rgb, shadow_alpha)
-    shadow_offset = (0.0, 1.0)
+    if background_mode == "on":
+        fill_rgba = (*bubble_rgb_tuple, int(round(opacity_cap * 255.0)))
+        reason = f"{reason}_box_on"
+    elif background_mode == "auto" and contrast_ratio < 3.0:
+        fill_rgba = (*bubble_rgb_tuple, int(round(opacity_cap * 255.0)))
+        reason = f"{reason}_box_auto"
 
-    x0, y0, x1, y1 = bbox
-    width = float(x1 - x0)
-    height = float(y1 - y0)
-    scale = max(1.0, 0.08 * np.sqrt(width * height) / 50.0)
-    pad_l, pad_t, pad_r, pad_b = _normalise_padding(padding, scale)
-    corner_radius = max(6.0, min(width, height) * corner_radius_factor)
+    if fill_rgba[3] <= 0:
+        padding = (0.0, 0.0, 0.0, 0.0)
+        corner_radius = 0.0
+        shadow_rgba = None
+    else:
+        x0, y0, x1, y1 = bbox
+        width = float(x1 - x0)
+        height = float(y1 - y0)
+        scale = max(1.0, 0.08 * np.sqrt(width * height) / 50.0)
+        padding = _normalise_padding((6.0, 4.0), scale)
+        corner_radius = max(8.0, min(width, height) * 0.12)
+        shadow_rgba = None
 
     logger.info(
-        "bubble_style mode=%s reason=%s variance=%.6f alpha=%d contrast=%.2f",
-        bubble_mode,
+        "text_style mode=%s reason=%s variance=%.6f std=%.6f contrast=%.2f stroke=%s",
+        text_color_mode,
         reason,
         variance,
-        fill_rgba[3],
-        contrast,
+        lum_std,
+        contrast_ratio,
+        "on" if stroke_alpha_value > 0 else "off",
     )
-    if (
-        mode_lower == "auto"
-        and not reason.startswith("dynamic")
-        and variance >= 0.0015
-    ):
-        logger.warning(
-            "auto bubble fallback triggered on busy patch (variance=%.6f, reason=%s)",
-            variance,
-            reason,
-        )
-
-    fill_gradient = None
-    if gradient_enabled:
-        start_rgb = (
-            tuple(int(v) for v in gradient_start[:3])
-            if isinstance(gradient_start, (list, tuple))
-            else adjusted_rgb_tuple
-        )
-        if isinstance(gradient_end, (list, tuple)):
-            end_rgb = tuple(int(v) for v in gradient_end[:3])
-        else:
-            start_arr = np.array(start_rgb, dtype=np.float32)
-            end_rgb = tuple(int(v) for v in _clip_rgb(start_arr + 35.0))
-        alpha_value = int(fill_rgba[3]) if len(fill_rgba) >= 4 else 255
-        fill_gradient = {
-            "type": "linear",
-            "angle": float(gradient_angle),
-            "start_rgba": (*start_rgb, alpha_value),
-            "end_rgba": (*end_rgb, alpha_value),
-        }
-
-    text_alpha_value = int(np.clip(text_alpha if text_alpha is not None else 255, 0, 255))
 
     return BubbleRenderStyle(
         fill_rgba=fill_rgba,
         text_rgb=text_rgb,
         text_alpha=text_alpha_value,
-        outline_rgb=outline_rgb,
+        outline_rgb=stroke_color,
+        outline_alpha=stroke_alpha_value,
         outline_width=outline_width,
         shadow_rgba=shadow_rgba,
-        shadow_offset=shadow_offset,
-        padding=(pad_l, pad_t, pad_r, pad_b),
+        shadow_offset=(0.0, 1.0),
+        padding=padding,
         corner_radius=corner_radius,
         reason=reason,
-        fill_gradient=fill_gradient,
+        fill_gradient=None,
     )
 
 
-__all__ = [
-    "BubbleRenderStyle",
-    "compute_dynamic_bubble_style",
-]
+__all__ = ["BubbleRenderStyle", "compute_dynamic_bubble_style"]
