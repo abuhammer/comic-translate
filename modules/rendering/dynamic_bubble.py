@@ -182,6 +182,48 @@ def _select_text_rgb(
     return _as_int_tuple(best_rgb), best_ratio, result_reason
 
 
+def _boost_alpha_for_light_text(
+    mean_rgb: np.ndarray,
+    bubble_rgb: np.ndarray,
+    start_alpha: int,
+    max_alpha: int,
+    text_min_contrast: float,
+) -> Tuple[int, Optional[np.ndarray]]:
+    """Increase alpha so white text can meet the contrast target."""
+
+    max_alpha = int(np.clip(max_alpha, 0, 255))
+    start_alpha = int(np.clip(start_alpha, 0, max_alpha))
+    if max_alpha <= start_alpha:
+        return start_alpha, None
+
+    white_lum = 1.0  # Relative luminance of sRGB white
+
+    best_alpha = start_alpha
+    best_blend = None
+    low = start_alpha
+    high = max_alpha
+    satisfied = False
+
+    while low <= high:
+        mid = (low + high) // 2
+        candidate_rgba = (*_as_int_tuple(bubble_rgb), int(mid))
+        blended = _blend_over(mean_rgb, candidate_rgba)
+        bubble_lum = _relative_luminance(_srgb_to_linear(blended))
+        ratio = _contrast_ratio(bubble_lum, white_lum)
+
+        if ratio >= text_min_contrast:
+            satisfied = True
+            best_alpha = mid
+            best_blend = blended
+            high = mid - 1
+        else:
+            low = mid + 1
+
+    if not satisfied:
+        return start_alpha, None
+    return best_alpha, best_blend
+
+
 def _choose_fill_and_text(
     mean_rgb: np.ndarray,
     mean_lum: float,
@@ -247,27 +289,60 @@ def _choose_fill_and_text(
         return bubble_rgba_dynamic, text_rgb, contrast, "opaque_mid_bubble", bubble_over
 
     if enable_plain_shortcuts and variance < flat_var:
-        if mean_lum >= plain_thresh_hi:
-            fill_rgba = (255, 255, 255, int(plain_alpha))
-            bubble_over = _blend_over(mean_rgb, fill_rgba)
-            text_rgb = (0, 0, 0)
-            text_lum = _relative_luminance(_srgb_to_linear(np.array(text_rgb, dtype=np.float32)))
-            contrast = _contrast_ratio(
-                text_lum, _relative_luminance(_srgb_to_linear(bubble_over))
+        if mean_lum >= plain_thresh_hi or mean_lum <= plain_thresh_lo:
+            boosted_alpha = int(
+                np.clip(
+                    max(dynamic_alpha, min(plain_alpha, 240)),
+                    dynamic_alpha,
+                    255,
+                )
             )
-            return fill_rgba, text_rgb, contrast, "forced_black_on_plain_white_bg", bubble_over
-        if mean_lum <= plain_thresh_lo:
-            fill_rgba = (0, 0, 0, int(plain_alpha))
+            fill_rgba = (*_as_int_tuple(bubble_rgb_arr), boosted_alpha)
             bubble_over = _blend_over(mean_rgb, fill_rgba)
-            text_rgb = (255, 255, 255)
-            text_lum = _relative_luminance(_srgb_to_linear(np.array(text_rgb, dtype=np.float32)))
-            contrast = _contrast_ratio(
-                text_lum, _relative_luminance(_srgb_to_linear(bubble_over))
+            text_rgb, contrast, reason = _select_text_rgb(bubble_over, text_min_contrast)
+            lightness_tag = "light" if mean_lum >= plain_thresh_hi else "dark"
+            return (
+                fill_rgba,
+                text_rgb,
+                contrast,
+                f"dynamic_plain_bg_{lightness_tag}",
+                bubble_over,
             )
-            return fill_rgba, text_rgb, contrast, "forced_white_on_plain_black_bg", bubble_over
 
     bubble_over = _blend_over(mean_rgb, bubble_rgba_dynamic)
     text_rgb, contrast, reason = _select_text_rgb(bubble_over, text_min_contrast)
+
+    prefer_light_text = bubble_lum <= 0.38
+    if (
+        bubble_mode_normalised in {"auto", "translucent"}
+        and prefer_light_text
+        and text_rgb == (0, 0, 0)
+    ):
+        alpha_ceiling = int(
+            np.clip(max(plain_alpha, dynamic_alpha), dynamic_alpha, 255)
+        )
+        boosted_alpha, boosted_blend = _boost_alpha_for_light_text(
+            mean_rgb,
+            bubble_rgb_arr,
+            dynamic_alpha,
+            alpha_ceiling,
+            text_min_contrast,
+        )
+        if boosted_alpha > dynamic_alpha:
+            bubble_rgba_dynamic = (
+                *_as_int_tuple(bubble_rgb_arr),
+                int(boosted_alpha),
+            )
+            bubble_over = (
+                boosted_blend
+                if boosted_blend is not None
+                else _blend_over(mean_rgb, bubble_rgba_dynamic)
+            )
+            text_rgb, contrast, reason = _select_text_rgb(
+                bubble_over, text_min_contrast
+            )
+            reason = "dynamic_boosted_light_text"
+
     return bubble_rgba_dynamic, text_rgb, contrast, reason, bubble_over
 
 
@@ -310,6 +385,12 @@ def compute_dynamic_bubble_style(
     t = var_clamped / max_variance_reference if max_variance_reference > 0 else 1.0
     alpha = int(round(min_alpha + (max_alpha - min_alpha) * t))
     alpha = int(np.clip(alpha, min_alpha, max_alpha))
+
+    mode_lower = (bubble_mode or "auto").lower()
+    if mode_lower == "translucent":
+        translucent_floor = int(np.clip(0.75 * max_alpha, min_alpha, 255))
+        alpha = max(alpha, translucent_floor)
+        alpha = int(np.clip(max(alpha, min(plain_alpha, 245)), min_alpha, 255))
 
     base_rgb = np.asarray(bubble_rgb, dtype=np.float32)
     mean_rgb = np.asarray(mean_rgb, dtype=np.float32)
@@ -363,7 +444,7 @@ def compute_dynamic_bubble_style(
         contrast,
     )
     if (
-        bubble_mode.lower() == "auto"
+        mode_lower == "auto"
         and not reason.startswith("dynamic")
         and variance >= 0.0015
     ):
