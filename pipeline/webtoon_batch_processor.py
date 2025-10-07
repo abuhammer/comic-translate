@@ -18,6 +18,7 @@ from modules.utils.pipeline_utils import inpaint_map, get_config, generate_mask,
 from modules.utils.translator_utils import format_translations
 from modules.utils.archives import make
 from modules.rendering.render import get_best_render_area, pyside_word_wrap
+from modules.rendering.dynamic_bubble import compute_dynamic_bubble_style
 from modules.rendering.adaptive_color import (
     TextColorClassifier,
     determine_text_outline_colors,
@@ -812,34 +813,68 @@ class WebtoonBatchProcessor:
             if any(lang in trg_lng_cd.lower() for lang in ['zh', 'ja', 'th']):
                 translation = translation.replace(' ', '')
 
+            blk_virtual.bubble_style = None
+            blk_virtual.outline_width = outline_width
+
+            bubble_style_obj = None
+            if (
+                auto_font_color
+                and background_image is not None
+                and (
+                    getattr(blk_virtual, 'text_class', '') == 'text_bubble'
+                    or getattr(blk_virtual, 'bubble_xyxy', None) is not None
+                )
+            ):
+                try:
+                    bubble_style_obj = compute_dynamic_bubble_style(background_image, blk_virtual)
+                except Exception:
+                    logger.exception("Dynamic bubble styling failed for virtual page %s", vpage.virtual_id)
+                    bubble_style_obj = None
+
             decision = None
             text_color = default_text_color
             outline_color = default_outline_color
-            if auto_font_color and self.text_color_classifier and background_image is not None:
-                try:
-                    decision = determine_text_outline_colors(background_image, blk_virtual, self.text_color_classifier)
-                except Exception:
-                    logger.exception("Adaptive colour inference failed for virtual page %s", vpage.virtual_id)
-                    decision = None
+            effective_outline_width = outline_width
 
-            if decision:
-                blk_virtual.font_color = decision.text_hex
-                blk_virtual.outline_color = decision.outline_hex
-                text_color = QColor(decision.text_hex)
-                outline_color = QColor(decision.outline_hex)
+            if bubble_style_obj:
+                bubble_style = bubble_style_obj.to_dict()
+                blk_virtual.bubble_style = bubble_style
+                text_rgb = bubble_style_obj.text_rgb
+                outline_rgb = bubble_style_obj.outline_rgb
+                text_hex = f"#{text_rgb[0]:02X}{text_rgb[1]:02X}{text_rgb[2]:02X}"
+                outline_hex = f"#{outline_rgb[0]:02X}{outline_rgb[1]:02X}{outline_rgb[2]:02X}"
+                blk_virtual.font_color = text_hex
+                blk_virtual.outline_color = outline_hex
+                blk_virtual.outline_width = bubble_style_obj.outline_width
+                text_color = QColor(*text_rgb)
+                outline_color = QColor(*outline_rgb)
+                effective_outline_width = bubble_style_obj.outline_width
             else:
-                if not getattr(blk_virtual, 'font_color', ''):
-                    blk_virtual.font_color = default_text_color.name()
-                text_color = QColor(blk_virtual.font_color)
-                if getattr(blk_virtual, 'outline_color', ''):
-                    outline_color = QColor(blk_virtual.outline_color)
-                elif outline:
-                    blk_virtual.outline_color = default_outline_color.name()
-                    outline_color = QColor(blk_virtual.outline_color)
-                else:
-                    outline_color = default_outline_color
+                if auto_font_color and self.text_color_classifier and background_image is not None:
+                    try:
+                        decision = determine_text_outline_colors(background_image, blk_virtual, self.text_color_classifier)
+                    except Exception:
+                        logger.exception("Adaptive colour inference failed for virtual page %s", vpage.virtual_id)
+                        decision = None
 
-            outline_enabled = outline or bool(decision) or bool(getattr(blk_virtual, 'outline_color', ''))
+                if decision:
+                    blk_virtual.font_color = decision.text_hex
+                    blk_virtual.outline_color = decision.outline_hex
+                    text_color = QColor(decision.text_hex)
+                    outline_color = QColor(decision.outline_hex)
+                else:
+                    if not getattr(blk_virtual, 'font_color', ''):
+                        blk_virtual.font_color = default_text_color.name()
+                    text_color = QColor(blk_virtual.font_color)
+                    if getattr(blk_virtual, 'outline_color', ''):
+                        outline_color = QColor(blk_virtual.outline_color)
+                    elif outline:
+                        blk_virtual.outline_color = default_outline_color.name()
+                        outline_color = QColor(blk_virtual.outline_color)
+                    else:
+                        outline_color = default_outline_color
+
+            outline_enabled = outline or bool(decision) or bool(getattr(blk_virtual, 'outline_color', '')) or bool(getattr(blk_virtual, 'bubble_style', None))
 
             render_blk = blk_virtual.deep_copy()
             render_blk.xyxy = list(physical_coords)
@@ -856,6 +891,8 @@ class WebtoonBatchProcessor:
             render_blk.translation = translation
             render_blk.font_color = blk_virtual.font_color
             render_blk.outline_color = blk_virtual.outline_color
+            render_blk.outline_width = getattr(blk_virtual, 'outline_width', outline_width)
+            render_blk.bubble_style = getattr(blk_virtual, 'bubble_style', None)
 
             if should_emit_live:
                 self.main_page.blk_rendered.emit(translation, font_size, render_blk)
@@ -873,7 +910,7 @@ class WebtoonBatchProcessor:
                 alignment=alignment,
                 line_spacing=line_spacing,
                 outline_color=outline_color if outline_enabled else None,
-                outline_width=outline_width,
+                outline_width=effective_outline_width,
                 bold=bold,
                 italic=italic,
                 underline=underline,
@@ -883,12 +920,13 @@ class WebtoonBatchProcessor:
                 transform_origin=blk_virtual.tr_origin_point if blk_virtual.tr_origin_point else (0, 0),
                 width=width,
                 direction=direction,
+                bubble_style=getattr(render_blk, 'bubble_style', None),
                 selection_outlines=[
                     OutlineInfo(
                         0,
                         len(translation),
                         outline_color,
-                        outline_width,
+                        effective_outline_width,
                         OutlineType.Full_Document
                     )
                 ] if outline_enabled else [],

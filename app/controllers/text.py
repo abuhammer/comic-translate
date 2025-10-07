@@ -158,13 +158,14 @@ class TextController:
         alignment = self.main.button_to_alignment[id]
         line_spacing = float(render_settings.line_spacing)
         outline_color_str = blk.outline_color if getattr(blk, 'outline_color', '') else render_settings.outline_color
-        outline_enabled = render_settings.outline or bool(getattr(blk, 'outline_color', ''))
+        outline_enabled = render_settings.outline or bool(getattr(blk, 'outline_color', '')) or bool(getattr(blk, 'bubble_style', None))
         outline_color = QColor(outline_color_str) if outline_enabled else None
-        outline_width = float(render_settings.outline_width)
+        outline_width = float(getattr(blk, 'outline_width', render_settings.outline_width))
         bold = render_settings.bold
         italic = render_settings.italic
         underline = render_settings.underline
         direction = render_settings.direction
+        bubble_style = getattr(blk, 'bubble_style', None)
 
         properties = TextItemProperties(
             text=text,
@@ -179,6 +180,7 @@ class TextController:
             italic=italic,
             underline=underline,
             direction=direction,
+            bubble_style=bubble_style,
             position=(blk.xyxy[0], blk.xyxy[1]),
             rotation=blk.angle,
         )

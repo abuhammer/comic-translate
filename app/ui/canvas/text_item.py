@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QGraphicsTextItem, QGraphicsItem, \
      QApplication, QWidget, QStyleOptionGraphicsItem
 from PySide6.QtGui import QFont, QCursor, QColor, \
-     QTextCharFormat, QTextBlockFormat, QTextCursor, QPainter
+     QTextCharFormat, QTextBlockFormat, QTextCursor, QPainter, QPainterPath
 from PySide6.QtCore import Qt, QRectF, Signal, QPointF
 import math, copy
 from dataclasses import dataclass
@@ -42,19 +42,20 @@ class TextBlockItem(QGraphicsTextItem):
     text_highlighted = Signal(dict)
     change_undo = Signal(TextBlockState, TextBlockState)
     
-    def __init__(self, 
-             text = "", 
-             font_family = "", 
-             font_size = 20, 
-             render_color = QColor(0, 0, 0), 
-             alignment = Qt.AlignmentFlag.AlignCenter, 
-             line_spacing = 1.2, 
-             outline_color = QColor(255, 255, 255), 
+    def __init__(self,
+             text = "",
+             font_family = "",
+             font_size = 20,
+             render_color = QColor(0, 0, 0),
+             alignment = Qt.AlignmentFlag.AlignCenter,
+             line_spacing = 1.2,
+             outline_color = QColor(255, 255, 255),
              outline_width = 1,
-             bold=False, 
-             italic=False, 
+             bold=False,
+             italic=False,
              underline=False,
-             direction=Qt.LayoutDirection.LeftToRight):
+             direction=Qt.LayoutDirection.LeftToRight,
+             bubble_style=None):
 
         super().__init__(text)
         self.text_color = render_color
@@ -87,6 +88,7 @@ class TextBlockItem(QGraphicsTextItem):
         self.old_state = None
 
         self.selection_outlines = []
+        self.bubble_style = None
 
         self.setAcceptHoverEvents(True)
         self.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
@@ -100,6 +102,58 @@ class TextBlockItem(QGraphicsTextItem):
 
         # Set the initial text direction
         self._apply_text_direction()
+        self.set_bubble_style(bubble_style)
+
+    def set_bubble_style(self, bubble_style):
+        if bubble_style is None:
+            if self.bubble_style is not None:
+                self.bubble_style = None
+                self.update()
+            return
+
+        if bubble_style is self.bubble_style:
+            bubble_style = dict(bubble_style)
+
+        normalised = {}
+        for key, value in bubble_style.items():
+            if key in {'fill_rgba', 'shadow_rgba', 'text_rgb', 'outline_rgb'} and value is not None:
+                normalised[key] = tuple(int(v) for v in value)
+            elif key in {'shadow_offset', 'padding'} and value is not None:
+                if isinstance(value, (list, tuple)):
+                    normalised[key] = tuple(float(v) for v in value)
+                else:
+                    normalised[key] = value
+            elif key == 'corner_radius':
+                normalised[key] = float(value)
+            else:
+                normalised[key] = value
+
+        if 'padding' not in normalised or normalised['padding'] is None:
+            normalised['padding'] = (12.0, 8.0, 12.0, 8.0)
+        if isinstance(normalised['padding'], (int, float)):
+            pad = float(normalised['padding'])
+            normalised['padding'] = (pad, pad, pad, pad)
+        elif len(normalised['padding']) == 2:
+            px, py = normalised['padding']
+            px = float(px)
+            py = float(py)
+            normalised['padding'] = (px, py, px, py)
+        else:
+            normalised['padding'] = tuple(float(v) for v in normalised['padding'])
+
+        if 'shadow_offset' in normalised and normalised['shadow_offset'] is not None:
+            offset = normalised['shadow_offset']
+            if isinstance(offset, (int, float)):
+                normalised['shadow_offset'] = (float(offset), float(offset))
+            elif len(offset) >= 2:
+                normalised['shadow_offset'] = (float(offset[0]), float(offset[1]))
+        else:
+            normalised['shadow_offset'] = (0.0, 1.0)
+
+        changed = normalised != self.bubble_style
+        self.bubble_style = normalised
+        if changed:
+            self.update()
 
     def _apply_text_direction(self):
         text_option = self.document().defaultTextOption()
@@ -321,12 +375,14 @@ class TextBlockItem(QGraphicsTextItem):
         
         self.update()
 
-    def paint(   
-        self, 
-        painter: QPainter, 
-        option: QStyleOptionGraphicsItem, 
+    def paint(
+        self,
+        painter: QPainter,
+        option: QStyleOptionGraphicsItem,
         widget: QWidget = None
     ):
+
+        self._draw_bubble(painter)
 
         # Then handle any selection outlines
         if self.selection_outlines:
@@ -365,6 +421,47 @@ class TextBlockItem(QGraphicsTextItem):
 
         # Draw the normal text on top
         super().paint(painter, option, widget)
+
+    def _draw_bubble(self, painter: QPainter):
+        if not self.bubble_style:
+            return
+
+        fill = self.bubble_style.get('fill_rgba')
+        if not fill:
+            return
+
+        alpha = fill[3] if len(fill) >= 4 else 255
+        if alpha <= 0:
+            return
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        rect = self.boundingRect()
+        padding = self.bubble_style.get('padding', (12.0, 8.0, 12.0, 8.0))
+        left, top, right, bottom = padding if len(padding) == 4 else (12.0, 8.0, 12.0, 8.0)
+        bubble_rect = rect.adjusted(-left, -top, right, bottom)
+
+        corner_radius = float(self.bubble_style.get('corner_radius', min(bubble_rect.width(), bubble_rect.height()) * 0.2))
+
+        shadow = self.bubble_style.get('shadow_rgba')
+        if shadow and len(shadow) >= 4 and shadow[3] > 0:
+            shadow_offset = self.bubble_style.get('shadow_offset', (0.0, 1.0))
+            painter.save()
+            painter.translate(float(shadow_offset[0]), float(shadow_offset[1]))
+            painter.setBrush(QColor(shadow[0], shadow[1], shadow[2], shadow[3]))
+            painter.setPen(Qt.PenStyle.NoPen)
+            shadow_path = QPainterPath()
+            shadow_path.addRoundedRect(bubble_rect, corner_radius, corner_radius)
+            painter.drawPath(shadow_path)
+            painter.restore()
+
+        painter.setBrush(QColor(fill[0], fill[1], fill[2], alpha))
+        painter.setPen(Qt.PenStyle.NoPen)
+        path = QPainterPath()
+        path.addRoundedRect(bubble_rect, corner_radius, corner_radius)
+        painter.drawPath(path)
+        painter.restore()
 
     def set_bold(self, state):
         if not self.textCursor().hasSelection():

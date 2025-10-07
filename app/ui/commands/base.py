@@ -209,6 +209,7 @@ class RectCommandBase:
                     is_close(item.line_spacing, properties.line_spacing) and
                     item.outline_color == properties.outline_color and
                     is_close(item.outline_width, properties.outline_width) and
+                    getattr(item, 'bubble_style', None) == getattr(properties, 'bubble_style', None) and
                     item.bold == properties.bold and
                     item.italic == properties.italic and
                     item.underline == properties.underline and

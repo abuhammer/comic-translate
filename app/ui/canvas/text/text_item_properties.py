@@ -2,6 +2,19 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Any
 from PySide6.QtGui import QColor
 from PySide6.QtCore import Qt
+import copy
+
+
+def _normalize_bubble_style(style):
+    if style is None:
+        return None
+    normalised = {}
+    for key, value in style.items():
+        if isinstance(value, list):
+            normalised[key] = tuple(value)
+        else:
+            normalised[key] = value
+    return normalised
 
 @dataclass
 class TextItemProperties:
@@ -31,6 +44,7 @@ class TextItemProperties:
     
     # Advanced properties
     selection_outlines: list = field(default_factory=list)
+    bubble_style: Optional[dict] = None
             
     @classmethod
     def from_dict(cls, data: dict) -> 'TextItemProperties':
@@ -84,6 +98,8 @@ class TextItemProperties:
         
         # Advanced
         props.selection_outlines = data.get('selection_outlines', [])
+        bubble_style = _normalize_bubble_style(data.get('bubble_style'))
+        props.bubble_style = copy.deepcopy(bubble_style) if bubble_style is not None else None
         
         return props
     
@@ -120,11 +136,20 @@ class TextItemProperties:
         
         # Advanced properties
         props.selection_outlines = getattr(item, 'selection_outlines', []).copy()
+        bubble_style = _normalize_bubble_style(getattr(item, 'bubble_style', None))
+        props.bubble_style = copy.deepcopy(bubble_style) if bubble_style is not None else None
         
         return props
     
     def to_dict(self) -> dict:
         """Convert TextItemProperties to dictionary"""
+        bubble_style = None
+        if self.bubble_style is not None:
+            bubble_style = copy.deepcopy(self.bubble_style)
+            for key in ('fill_rgba', 'text_rgb', 'outline_rgb', 'shadow_rgba', 'shadow_offset', 'padding'):
+                if key in bubble_style and isinstance(bubble_style[key], tuple):
+                    bubble_style[key] = list(bubble_style[key])
+
         return {
             'text': self.text,
             'font_family': self.font_family,
@@ -145,4 +170,5 @@ class TextItemProperties:
             'width': self.width,
             'vertical': self.vertical,
             'selection_outlines': self.selection_outlines,
+            'bubble_style': bubble_style,
         }

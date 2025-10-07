@@ -17,6 +17,7 @@ from modules.utils.pipeline_utils import inpaint_map, get_config, generate_mask,
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations
 from modules.utils.archives import make
 from modules.rendering.render import get_best_render_area, pyside_word_wrap
+from modules.rendering.dynamic_bubble import compute_dynamic_bubble_style
 from modules.rendering.adaptive_color import (
     TextColorClassifier,
     determine_text_outline_colors,
@@ -352,37 +353,76 @@ class BatchProcessor:
                 translation, font_size = pyside_word_wrap(translation, font, width, height,
                                                         line_spacing, outline_width, bold, italic, underline,
                                                         alignment, direction, max_font_size, min_font_size)
-                
+
+                blk.bubble_style = None
+                blk.outline_width = outline_width
+
+                bubble_style_obj = None
+                if (
+                    auto_font_color
+                    and background_for_sampling is not None
+                    and (
+                        getattr(blk, 'text_class', '') == 'text_bubble'
+                        or getattr(blk, 'bubble_xyxy', None) is not None
+                    )
+                ):
+                    try:
+                        bubble_style_obj = compute_dynamic_bubble_style(background_for_sampling, blk)
+                    except Exception:
+                        logger.exception("Dynamic bubble styling failed for block")
+                        bubble_style_obj = None
+
                 decision = None
                 text_color = default_text_color
                 outline_color = default_outline_color
-                if auto_font_color and self.text_color_classifier and background_for_sampling is not None:
-                    try:
-                        decision = determine_text_outline_colors(
-                            background_for_sampling, blk, self.text_color_classifier
-                        )
-                    except Exception:
-                        logger.exception("Adaptive colour inference failed for block")
-                        decision = None
+                effective_outline_width = outline_width
 
-                if decision:
-                    blk.font_color = decision.text_hex
-                    blk.outline_color = decision.outline_hex
-                    text_color = QColor(decision.text_hex)
-                    outline_color = QColor(decision.outline_hex)
+                if bubble_style_obj:
+                    bubble_style = bubble_style_obj.to_dict()
+                    blk.bubble_style = bubble_style
+                    text_rgb = bubble_style_obj.text_rgb
+                    outline_rgb = bubble_style_obj.outline_rgb
+                    text_hex = f"#{text_rgb[0]:02X}{text_rgb[1]:02X}{text_rgb[2]:02X}"
+                    outline_hex = f"#{outline_rgb[0]:02X}{outline_rgb[1]:02X}{outline_rgb[2]:02X}"
+                    blk.font_color = text_hex
+                    blk.outline_color = outline_hex
+                    blk.outline_width = bubble_style_obj.outline_width
+                    text_color = QColor(*text_rgb)
+                    outline_color = QColor(*outline_rgb)
+                    effective_outline_width = bubble_style_obj.outline_width
                 else:
-                    if not getattr(blk, 'font_color', ''):
-                        blk.font_color = default_text_color.name()
-                    text_color = QColor(blk.font_color)
-                    if getattr(blk, 'outline_color', ''):
-                        outline_color = QColor(blk.outline_color)
-                    elif render_settings.outline:
-                        blk.outline_color = default_outline_color.name()
-                        outline_color = QColor(blk.outline_color)
-                    else:
-                        outline_color = default_outline_color
+                    if auto_font_color and self.text_color_classifier and background_for_sampling is not None:
+                        try:
+                            decision = determine_text_outline_colors(
+                                background_for_sampling, blk, self.text_color_classifier
+                            )
+                        except Exception:
+                            logger.exception("Adaptive colour inference failed for block")
+                            decision = None
 
-                outline_enabled = render_settings.outline or bool(decision) or bool(getattr(blk, 'outline_color', ''))
+                    if decision:
+                        blk.font_color = decision.text_hex
+                        blk.outline_color = decision.outline_hex
+                        text_color = QColor(decision.text_hex)
+                        outline_color = QColor(decision.outline_hex)
+                    else:
+                        if not getattr(blk, 'font_color', ''):
+                            blk.font_color = default_text_color.name()
+                        text_color = QColor(blk.font_color)
+                        if getattr(blk, 'outline_color', ''):
+                            outline_color = QColor(blk.outline_color)
+                        elif render_settings.outline:
+                            blk.outline_color = default_outline_color.name()
+                            outline_color = QColor(blk.outline_color)
+                        else:
+                            outline_color = default_outline_color
+
+                outline_enabled = (
+                    render_settings.outline
+                    or bool(decision)
+                    or bool(getattr(blk, 'outline_color', ''))
+                    or bool(getattr(blk, 'bubble_style', None))
+                )
 
                 # Display text if on current page with adaptive colours applied
                 if image_path == file_on_display:
@@ -401,7 +441,7 @@ class BatchProcessor:
                     alignment=alignment,
                     line_spacing=line_spacing,
                     outline_color=outline_color if outline_enabled else None,
-                    outline_width=outline_width,
+                    outline_width=effective_outline_width,
                     bold=bold,
                     italic=italic,
                     underline=underline,
@@ -411,10 +451,11 @@ class BatchProcessor:
                     transform_origin=blk.tr_origin_point,
                     width=width,
                     direction=direction,
+                    bubble_style=getattr(blk, 'bubble_style', None),
                     selection_outlines=[
                         OutlineInfo(0, len(translation),
                         outline_color,
-                        outline_width,
+                        effective_outline_width,
                         OutlineType.Full_Document)
                     ] if outline_enabled else [],
                 )

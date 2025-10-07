@@ -50,6 +50,7 @@ class ImageSaveRenderer:
                 italic=text_props.italic,
                 underline=text_props.underline,
                 direction=text_props.direction,
+                bubble_style=text_props.bubble_style,
             )
 
             text_item.set_text(text_props.text, text_props.width)
