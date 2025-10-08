@@ -13,6 +13,8 @@ from ..detection.utils.bubbles import make_bubble_mask, bubble_interior_bounds
 from ..utils.textblock import adjust_blks_size
 from modules.detection.utils.geometry import shrink_bbox
 from .adaptive_color import TextColorClassifier, determine_text_outline_colors
+from .auto_style import AutoStyleEngine
+from schemas.style_state import StyleState
 
 from dataclasses import dataclass
 
@@ -300,6 +302,70 @@ def pyside_word_wrap(text: str, font_input: str, roi_width: int, roi_height: int
 
     # return mutable_message, font_size
 
+def _alignment_to_name(alignment: Qt.AlignmentFlag) -> str:
+    if alignment == Qt.AlignmentFlag.AlignCenter:
+        return "center"
+    if alignment == Qt.AlignmentFlag.AlignRight:
+        return "right"
+    if alignment == Qt.AlignmentFlag.AlignJustify:
+        return "justify"
+    return "left"
+
+
+def _hex_to_rgb(color: Optional[str]) -> Optional[tuple[int, int, int]]:
+    if not color:
+        return None
+    value = color.strip().lstrip("#")
+    if len(value) == 3:
+        value = "".join(ch * 2 for ch in value)
+    if len(value) != 6:
+        return None
+    try:
+        r = int(value[0:2], 16)
+        g = int(value[2:4], 16)
+        b = int(value[4:6], 16)
+    except ValueError:
+        return None
+    return (r, g, b)
+
+
+def _rgb_to_hex(rgb: Optional[tuple[int, int, int]]) -> str:
+    if rgb is None:
+        return ""
+    return "#" + "".join(f"{channel:02X}" for channel in rgb)
+
+
+def _build_base_style(
+    render_settings: TextRenderingSettings,
+    alignment,
+) -> StyleState:
+    auto_font_color = getattr(render_settings, "auto_font_color", True)
+    outline_width = float(render_settings.outline_width)
+    stroke_size = int(round(outline_width)) if outline_width > 0 else None
+
+    base_style = StyleState(
+        font_family=render_settings.font_family or StyleState().font_family,
+        font_size=render_settings.max_font_size or StyleState().font_size,
+        text_align=_alignment_to_name(alignment),
+        auto_color=auto_font_color,
+        font_weight="bold" if render_settings.bold else "normal",
+        italic=render_settings.italic,
+        underline=render_settings.underline,
+    )
+
+    if auto_font_color:
+        base_style.stroke_enabled = render_settings.outline
+        base_style.stroke_size = stroke_size if render_settings.outline else None
+    else:
+        base_style.fill = _hex_to_rgb(render_settings.color) or base_style.fill
+        stroke_rgb = _hex_to_rgb(render_settings.outline_color) if render_settings.outline else None
+        base_style.stroke = stroke_rgb
+        base_style.stroke_enabled = stroke_rgb is not None
+        base_style.stroke_size = stroke_size if stroke_rgb is not None else None
+
+    return base_style
+
+
 def manual_wrap(
     main_page,
     blk_list: List[TextBlock],
@@ -313,12 +379,16 @@ def manual_wrap(
     default_text_color = render_settings.color or "#000000"
     default_outline_color = render_settings.outline_color or "#FFFFFF"
 
+    text_ctrl = getattr(main_page, "text_ctrl", None)
+    engine = getattr(text_ctrl, "auto_style_engine", None) if text_ctrl is not None else None
+    if engine is None:
+        engine = AutoStyleEngine()
+
     if auto_font_color and background_image is None:
         # Fall back to the base page image when the caller does not provide an
         # explicit sampling surface. This keeps adaptive colours working even
         # if the UI thread could not capture an augmented view of the page.
         try:
-            text_ctrl = getattr(main_page, "text_ctrl", None)
             if text_ctrl is not None and hasattr(text_ctrl, "_get_current_base_image"):
                 background_image = text_ctrl._get_current_base_image()
         except Exception:
@@ -334,6 +404,17 @@ def manual_wrap(
     init_font_size = render_settings.max_font_size
     min_font_size = render_settings.min_font_size
 
+    base_style = _build_base_style(render_settings, alignment)
+
+    engine_results: dict[int, StyleState] = {}
+    if auto_font_color and background_image is not None:
+        try:
+            for result in engine.analyse_image(background_image, blk_list, base_style):
+                for blk in result.group.blocks:
+                    engine_results[id(blk)] = result.style.copy()
+        except Exception:
+            pass
+
     for blk in blk_list:
         x1, y1, width, height = blk.xywh
 
@@ -341,24 +422,68 @@ def manual_wrap(
         if not translation or len(translation) == 1:
             continue
 
-        decision = None
-        if auto_font_color and classifier and background_image is not None:
-            try:
-                decision = determine_text_outline_colors(background_image, blk, classifier)
-            except Exception:
-                decision = None
+        engine_style = engine_results.get(id(blk))
 
-        if decision:
-            blk.font_color = decision.text_hex
-            blk.outline_color = decision.outline_hex
+        if engine_style is not None:
+            style_state = engine_style.copy()
         else:
-            blk.font_color = blk.font_color or default_text_color
-            if not getattr(blk, 'outline_color', ''):
-                blk.outline_color = default_outline_color if render_settings.outline else ''
+            style_state = base_style.copy()
+            decision = None
+            if auto_font_color and classifier and background_image is not None:
+                try:
+                    decision = determine_text_outline_colors(background_image, blk, classifier)
+                except Exception:
+                    decision = None
+            if decision:
+                fill_rgb = _hex_to_rgb(decision.text_hex)
+                stroke_rgb = _hex_to_rgb(decision.outline_hex)
+                if fill_rgb:
+                    style_state.fill = fill_rgb
+                if stroke_rgb:
+                    style_state.stroke = stroke_rgb
+                    style_state.stroke_enabled = True
+                    if style_state.stroke_size is None and outline_width > 0:
+                        style_state.stroke_size = int(round(outline_width))
+                else:
+                    style_state.stroke = None
+                    style_state.stroke_enabled = False
+                    style_state.stroke_size = None
+            elif not auto_font_color:
+                pass
+            else:
+                fill_rgb = _hex_to_rgb(default_text_color)
+                stroke_rgb = _hex_to_rgb(default_outline_color) if render_settings.outline else None
+                if fill_rgb:
+                    style_state.fill = fill_rgb
+                if stroke_rgb:
+                    style_state.stroke = stroke_rgb
+                    style_state.stroke_enabled = True
+                    if style_state.stroke_size is None and outline_width > 0:
+                        style_state.stroke_size = int(round(outline_width))
+                else:
+                    style_state.stroke = None
+                    style_state.stroke_enabled = False
+                    style_state.stroke_size = None
+
+        fill_rgb = style_state.fill
+        stroke_rgb = style_state.stroke if style_state.stroke_enabled else None
+
+        if fill_rgb is None:
+            fallback_fill = _hex_to_rgb(default_text_color)
+            if fallback_fill is not None:
+                style_state.fill = fallback_fill
+                fill_rgb = fallback_fill
+
+        blk.font_color = _rgb_to_hex(fill_rgb) or default_text_color
+        blk.outline_color = _rgb_to_hex(stroke_rgb)
+
+        blk.style_state = style_state.copy()
 
         translation, font_size = pyside_word_wrap(translation, font_family, width, height,
                                                  line_spacing, outline_width, bold, italic, underline,
                                                  alignment, direction, init_font_size, min_font_size)
+
+        blk.style_state.font_size = font_size
 
         main_page.blk_rendered.emit(translation, font_size, blk)
 
