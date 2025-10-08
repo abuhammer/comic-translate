@@ -68,6 +68,11 @@ class WebtoonController:
         curr_img_idx = self.main.curr_img_idx
         current_page = max(0, min(curr_img_idx, len(self.image_files) - 1))
         
+        # Update the main controller's current page tracking immediately so
+        # downstream logic (like adaptive colour detection) can reference the
+        # proper base image even before lazy page detection finishes
+        self.main.curr_img_idx = current_page
+
         # Load with lazy strategy, starting from current page
         success = self.image_viewer.load_images_webtoon(self.image_files, current_page)
         if not success:
@@ -230,6 +235,19 @@ class WebtoonController:
     def _on_lazy_manager_ready(self):
         """Called when the lazy manager has completed initialization."""
         self._initialization_complete = True
+
+        # Ensure the main controller is synchronised with the page the layout
+        # manager settled on once detection is enabled. This guarantees that
+        # features relying on the current image index (auto colour/outline
+        # detection, adaptive styling, etc.) have an accurate reference in
+        # webtoon mode.
+        layout_manager = getattr(self.image_viewer.webtoon_manager, 'layout_manager', None)
+        if layout_manager is None:
+            return
+
+        page_index = getattr(layout_manager, 'current_page_index', -1)
+        if 0 <= page_index < len(self.image_files):
+            self.on_page_changed(page_index)
 
     def toggle_webtoon_mode(self):
         """Toggle between regular image viewer and webtoon mode."""

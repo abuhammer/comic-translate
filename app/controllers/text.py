@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import math
 import numpy as np
 from typing import TYPE_CHECKING, Iterable, Optional
 
@@ -46,6 +47,7 @@ class TextController:
         self.auto_style_engine = AutoStyleEngine()
         self.style_panel: Optional[StylePanel] = getattr(self.main, "style_panel", None)
         self._style_panel_updating = False
+        self._adaptive_background_metadata: Optional[dict] = None
 
         if self.style_panel is not None:
             self.style_panel.styleChanged.connect(self.on_style_panel_changed)
@@ -83,30 +85,265 @@ class TextController:
             return None
 
     @staticmethod
-    def _image_covers_blocks(
-        image: Optional[np.ndarray], blocks: Iterable[TextBlock]
-    ) -> bool:
-        """Ensure every block lies within the provided image bounds."""
+    def _clamp_bbox_to_image(
+        bbox: tuple[float, float, float, float],
+        width: int,
+        height: int,
+    ) -> Optional[list[int]]:
+        """Clamp a floating-point bbox to image bounds, returning ints or None."""
 
-        if image is None or getattr(image, "size", 0) == 0:
-            return False
+        if width <= 0 or height <= 0 or not bbox:
+            return None
 
-        height, width = image.shape[:2]
+        x1, y1, x2, y2 = bbox
+        x1 = max(0, min(width, math.floor(x1)))
+        y1 = max(0, min(height, math.floor(y1)))
+        x2 = max(0, min(width, math.ceil(x2)))
+        y2 = max(0, min(height, math.ceil(y2)))
+
+        if x2 <= x1 or y2 <= y1:
+            return None
+
+        return [x1, y1, x2, y2]
+
+    def _build_webtoon_page_metadata(
+        self,
+        blocks: list[TextBlock],
+        page_index: int,
+        page_image: Optional[np.ndarray],
+    ) -> Optional[dict]:
+        """Compute per-block sampling bounds for the active webtoon page."""
+
+        manager = getattr(self.main.image_viewer, "webtoon_manager", None)
+        if (
+            page_image is None
+            or manager is None
+            or not (0 <= page_index < len(manager.image_positions))
+        ):
+            return None
+
+        height, width = page_image.shape[:2]
+        page_y = manager.image_positions[page_index]
+        page_height = (
+            manager.image_heights[page_index]
+            if page_index < len(manager.image_heights)
+            else height
+        )
+        page_width = width
+        page_x_offset = (manager.webtoon_width - page_width) / 2 if manager.webtoon_width else 0
+
+        block_map: dict[int, dict] = {}
         for blk in blocks:
-            if getattr(blk, "xyxy", None) is None:
+            xyxy = getattr(blk, "xyxy", None)
+            if xyxy is None:
                 continue
 
+            y1_scene, y2_scene = xyxy[1], xyxy[3]
+            if y2_scene <= page_y or y1_scene >= page_y + page_height:
+                continue
+
+            local_bbox = (
+                xyxy[0] - page_x_offset,
+                y1_scene - page_y,
+                xyxy[2] - page_x_offset,
+                y2_scene - page_y,
+            )
+            clamped_bbox = self._clamp_bbox_to_image(local_bbox, width, height)
+            if clamped_bbox is None:
+                continue
+
+            entry: dict[str, list[int]] = {"bbox": clamped_bbox}
+            bubble = getattr(blk, "bubble_xyxy", None)
+            if bubble is not None:
+                bubble_local = (
+                    bubble[0] - page_x_offset,
+                    bubble[1] - page_y,
+                    bubble[2] - page_x_offset,
+                    bubble[3] - page_y,
+                )
+                bubble_clamped = self._clamp_bbox_to_image(bubble_local, width, height)
+                if bubble_clamped is not None:
+                    entry["bubble"] = bubble_clamped
+
+            block_map[id(blk)] = entry
+
+        if not block_map:
+            return None
+
+        return {
+            "type": "page",
+            "page_index": page_index,
+            "block_map": block_map,
+            "image_shape": (height, width),
+        }
+
+    def _build_visible_area_metadata(
+        self,
+        blocks: list[TextBlock],
+        mappings: list[dict],
+        image_shape: tuple[int, int],
+    ) -> Optional[dict]:
+        """Compute sampling bounds for blocks within the combined visible capture."""
+
+        manager = getattr(self.main.image_viewer, "webtoon_manager", None)
+        if manager is None or not mappings or not image_shape:
+            return None
+
+        height, width = image_shape[:2]
+        mapping_by_page: dict[int, list[dict]] = {}
+        for mapping in mappings:
+            page_idx = mapping.get("page_index")
+            if page_idx is None:
+                continue
+            mapping_by_page.setdefault(page_idx, []).append(mapping)
+
+        if not mapping_by_page:
+            return None
+
+        block_map: dict[int, dict] = {}
+        layout_manager = getattr(manager, "layout_manager", None)
+
+        for blk in blocks:
+            xyxy = getattr(blk, "xyxy", None)
+            if xyxy is None:
+                continue
+
+            center_y = (xyxy[1] + xyxy[3]) / 2.0
+            page_idx = None
+            if layout_manager is not None:
+                page_idx = layout_manager.get_page_at_position(center_y)
+            if page_idx is None or page_idx not in mapping_by_page:
+                continue
+
+            page_y = manager.image_positions[page_idx]
+            page_height = (
+                manager.image_heights[page_idx]
+                if page_idx < len(manager.image_heights)
+                else 0
+            )
+            if page_height <= 0:
+                continue
+
+            y1_local = xyxy[1] - page_y
+            y2_local = xyxy[3] - page_y
+            if y2_local <= 0 or y1_local >= page_height:
+                continue
+
+            if page_idx in manager.image_data:
+                page_width = manager.image_data[page_idx].shape[1]
+            else:
+                page_width = manager.webtoon_width or width
+            page_x_offset = (manager.webtoon_width - page_width) / 2 if manager.webtoon_width else 0
+
+            x1_local = xyxy[0] - page_x_offset
+            x2_local = xyxy[2] - page_x_offset
+
+            for mapping in mapping_by_page[page_idx]:
+                crop_top = mapping.get("page_crop_top", 0)
+                crop_bottom = mapping.get("page_crop_bottom", page_height)
+                if y2_local <= crop_top or y1_local >= crop_bottom:
+                    continue
+
+                combined_start = mapping.get("combined_y_start", 0)
+                y1_combined = (y1_local - crop_top) + combined_start
+                y2_combined = (y2_local - crop_top) + combined_start
+
+                clamped_bbox = self._clamp_bbox_to_image(
+                    (x1_local, y1_combined, x2_local, y2_combined), width, height
+                )
+                if clamped_bbox is None:
+                    continue
+
+                entry: dict[str, list[int]] = {"bbox": clamped_bbox}
+                bubble = getattr(blk, "bubble_xyxy", None)
+                if bubble is not None:
+                    bubble_local = (
+                        bubble[0] - page_x_offset,
+                        bubble[1] - page_y,
+                        bubble[2] - page_x_offset,
+                        bubble[3] - page_y,
+                    )
+                    bubble_y1 = (bubble_local[1] - crop_top) + combined_start
+                    bubble_y2 = (bubble_local[3] - crop_top) + combined_start
+                    bubble_clamped = self._clamp_bbox_to_image(
+                        (bubble_local[0], bubble_y1, bubble_local[2], bubble_y2),
+                        width,
+                        height,
+                    )
+                    if bubble_clamped is not None:
+                        entry["bubble"] = bubble_clamped
+
+                block_map[id(blk)] = entry
+                break
+
+        if not block_map:
+            return None
+
+        return {
+            "type": "visible",
+            "block_map": block_map,
+            "image_shape": (height, width),
+        }
+
+    def _capture_standard_view_image(
+        self, paint_all: bool, include_patches: bool
+    ) -> Optional[np.ndarray]:
+        """Capture the current view for regular mode with graceful fallbacks."""
+
+        viewer_image = None
+        try:
+            viewer_image = self.main.image_viewer.get_image_array(
+                paint_all=paint_all, include_patches=include_patches
+            )
+            if viewer_image is not None:
+                viewer_image = viewer_image.copy()
+        except Exception:
+            logger.exception("Failed to capture background for adaptive colours")
+            viewer_image = None
+
+        if viewer_image is None and include_patches:
             try:
-                x1, y1, x2, y2 = (int(v) for v in blk.xyxy)
+                viewer_image = self.main.image_viewer.get_image_array(
+                    paint_all=paint_all, include_patches=False
+                )
+                if viewer_image is not None:
+                    viewer_image = viewer_image.copy()
             except Exception:
-                return False
+                logger.exception("Failed to capture background for adaptive colours")
+                viewer_image = None
 
-            if x1 < 0 or y1 < 0:
-                return False
-            if x2 > width or y2 > height:
-                return False
+        if viewer_image is None:
+            try:
+                viewer_image = self.main.image_viewer.get_image_array()
+                if viewer_image is not None:
+                    viewer_image = viewer_image.copy()
+            except Exception:
+                logger.exception("Failed to capture background for adaptive colours")
+                viewer_image = None
 
-        return True
+        return viewer_image
+
+    def _capture_webtoon_visible_area(
+        self, paint_all: bool, include_patches: bool
+    ) -> tuple[Optional[np.ndarray], list]:
+        """Capture the combined visible area in webtoon mode with fallbacks."""
+
+        image = None
+        mappings: list = []
+        try:
+            image, mappings = self.main.image_viewer.get_visible_area_image(
+                paint_all=paint_all, include_patches=include_patches
+            )
+            if image is not None:
+                image = image.copy()
+        except Exception:
+            logger.exception("Failed to capture webtoon visible area for adaptive colours")
+            image, mappings = None, []
+
+        if image is None:
+            return self._capture_standard_view_image(paint_all, include_patches), []
+
+        return image, mappings
 
     def _prepare_background_image(
         self,
@@ -115,38 +352,48 @@ class TextController:
     ) -> Optional[np.ndarray]:
         """Collect a background image aligned with block coordinates."""
 
+        blocks = list(blocks or [])
+
         if not getattr(render_settings, "auto_font_color", True):
+            self._adaptive_background_metadata = None
             return None
 
-        viewer_image = None
-        try:
-            viewer_image = self.main.image_viewer.get_image_array(
+        # Handle specialised capture for webtoon mode
+        if getattr(self.main, "webtoon_mode", False):
+            page_index = getattr(self.main, "curr_img_idx", -1)
+            base_image = self._get_current_base_image()
+
+            metadata = self._build_webtoon_page_metadata(blocks, page_index, base_image)
+            if metadata is not None:
+                self._adaptive_background_metadata = metadata
+                return base_image
+
+            visible_image, mappings = self._capture_webtoon_visible_area(
                 paint_all=True, include_patches=True
             )
-            if viewer_image is None:
-                viewer_image = self.main.image_viewer.get_image_array(
-                    paint_all=True, include_patches=False
+            if visible_image is not None:
+                metadata = self._build_visible_area_metadata(
+                    blocks, mappings, visible_image.shape
                 )
-            if viewer_image is None:
-                viewer_image = self.main.image_viewer.get_image_array()
-            if viewer_image is not None:
-                viewer_image = viewer_image.copy()
-        except Exception:
-            logger.exception("Failed to capture background for adaptive colours")
-            viewer_image = None
+                self._adaptive_background_metadata = metadata
+                return visible_image
 
-        base_image = self._get_current_base_image()
-
-        # Prefer the unmodified base image because block coordinates are derived
-        # from the original detection resolution. Fall back to the viewer capture
-        # only when the base image is unavailable or does not cover the blocks.
-        if base_image is not None and self._image_covers_blocks(base_image, blocks):
+            # Fall back to the base image if all else fails
+            self._adaptive_background_metadata = None
             return base_image
 
-        if viewer_image is not None and self._image_covers_blocks(viewer_image, blocks):
-            return viewer_image
+        # Regular mode – use viewer capture fallbacks
+        viewer_image = self._capture_standard_view_image(
+            paint_all=True, include_patches=True
+        )
+        base_image = self._get_current_base_image()
 
-        return base_image if base_image is not None else viewer_image
+        self._adaptive_background_metadata = None
+
+        if base_image is not None:
+            return base_image
+
+        return viewer_image
 
     def clear_text_edits(self):
         self.main.curr_tblock = None
