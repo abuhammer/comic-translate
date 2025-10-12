@@ -53,10 +53,12 @@ def download_images(
 ):
     dest_dir.mkdir(parents=True, exist_ok=True)
     sess = requests.Session()
+    referer_header = _normalize_referer(referer)
     sess.headers.update({
         "User-Agent": UA,
-        "Referer": referer or BASE,
-        "Accept": "image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Referer": referer_header,
+        "Origin": referer_header.rstrip("/"),
+        "Accept": "*/*",
         "Accept-Language": "en-US,en;q=0.9",
     })
     if cookies:
@@ -87,6 +89,19 @@ def download_images(
                 for chunk in r.iter_content(1 << 14):
                     if chunk:
                         f.write(chunk)
+
+def _normalize_referer(chapter_referer: Optional[str]) -> str:
+    if chapter_referer:
+        try:
+            from urllib.parse import urlparse
+
+            parsed = urlparse(chapter_referer)
+            if parsed.scheme in {"http", "https"} and parsed.netloc:
+                origin = f"{parsed.scheme}://{parsed.netloc}"
+                return origin.rstrip("/") + "/"
+        except Exception:
+            pass
+    return BASE.rstrip("/") + "/"
 
 def _ext_from_url(url: str) -> str:
     q = url.split("?", 1)[0].lower()
