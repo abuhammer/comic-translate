@@ -14,8 +14,8 @@ def _ext_from_url(url: str) -> str:
 
 def import_colamanga_chapter(chapter_url: str, out_dir: str) -> List[str]:
     dest_dir = Path(out_dir)
-    urls, cookies = get_chapter_images(chapter_url)
-    download_images(urls, dest_dir, cookies)
+    urls, cookies, referer = get_chapter_images(chapter_url)
+    download_images(urls, dest_dir, cookies, referer=referer)
     return [
         str((dest_dir / f"page_{index:03d}{_ext_from_url(url)}").resolve())
         for index, url in enumerate(urls, start=1)

@@ -12,7 +12,9 @@ CookieDict = Dict[str, Any]
 
 RESOLVER_JS_PATH = Path(__file__).with_name("resolver_js.js")
 
-def get_chapter_images(chapter_url: str, timeout_ms: int = 15000) -> Tuple[List[str], List[CookieDict]]:
+def get_chapter_images(
+    chapter_url: str, timeout_ms: int = 15000
+) -> Tuple[List[str], List[CookieDict], str]:
     if not chapter_url.startswith("http"):
         raise ValueError("chapter_url must be an absolute https:// URL")
     with sync_playwright() as p:
@@ -39,16 +41,23 @@ def get_chapter_images(chapter_url: str, timeout_ms: int = 15000) -> Tuple[List[
             browser.close()
             raise RuntimeError(f"ColaManga resolver failed: {result}")
         cookies: List[CookieDict] = ctx.cookies()
+        page_url = page.url
         browser.close()
-    return result["urls"], cookies
+    return result["urls"], cookies, page_url
 
-def download_images(urls: List[str], dest_dir: Path, cookies: Optional[List[CookieDict]] = None):
+def download_images(
+    urls: List[str],
+    dest_dir: Path,
+    cookies: Optional[List[CookieDict]] = None,
+    referer: Optional[str] = None,
+):
     dest_dir.mkdir(parents=True, exist_ok=True)
     sess = requests.Session()
     sess.headers.update({
         "User-Agent": UA,
-        "Referer": BASE,
-        "Accept": "image/avif,image/webp,image/apng,*/*;q=0.8"
+        "Referer": referer or BASE,
+        "Accept": "image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
     })
     if cookies:
         for cookie in cookies:
