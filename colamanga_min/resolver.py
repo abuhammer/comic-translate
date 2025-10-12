@@ -53,13 +53,16 @@ def download_images(
 ) -> List[Path]:
     dest_dir.mkdir(parents=True, exist_ok=True)
     sess = requests.Session()
-    referer_header = _normalize_referer(referer)
+    referer_header, origin_header = _referer_and_origin(referer)
     sess.headers.update({
         "User-Agent": UA,
         "Referer": referer_header,
-        "Origin": referer_header.rstrip("/"),
-        "Accept": "*/*",
+        "Origin": origin_header,
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "no-cors",
+        "Sec-Fetch-Dest": "image",
     })
     if cookies:
         for cookie in cookies:
@@ -93,7 +96,7 @@ def download_images(
         saved_paths.append(path)
     return saved_paths
 
-def _normalize_referer(chapter_referer: Optional[str]) -> str:
+def _referer_and_origin(chapter_referer: Optional[str]) -> Tuple[str, str]:
     if chapter_referer:
         try:
             from urllib.parse import urlparse
@@ -101,10 +104,11 @@ def _normalize_referer(chapter_referer: Optional[str]) -> str:
             parsed = urlparse(chapter_referer)
             if parsed.scheme in {"http", "https"} and parsed.netloc:
                 origin = f"{parsed.scheme}://{parsed.netloc}"
-                return origin.rstrip("/") + "/"
+                return chapter_referer, origin
         except Exception:
             pass
-    return BASE.rstrip("/") + "/"
+    origin = BASE.rstrip("/")
+    return origin + "/", origin
 
 def _ext_from_url(url: str) -> str:
     q = _normalize_image_url(url).split("?", 1)[0].lower()
