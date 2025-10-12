@@ -1,6 +1,7 @@
 from io import BytesIO
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
+from urllib.parse import urlparse
 
 import requests
 from PIL import Image, UnidentifiedImageError
@@ -55,17 +56,19 @@ def download_images(
 ) -> List[Path]:
     dest_dir.mkdir(parents=True, exist_ok=True)
     sess = requests.Session()
-    referer_header, origin_header = _referer_and_origin(referer)
-    sess.headers.update({
-        "User-Agent": UA,
-        "Referer": referer_header,
-        "Origin": origin_header,
-        "Accept": "image/jpeg,image/png,image/*;q=0.8,*/*;q=0.5",
+    referer_header, origin_header, referer_host = _referer_and_origin(referer)
+    sess.headers.update({"User-Agent": UA})
+    base_headers = {
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
-        "Sec-Fetch-Site": "same-origin",
         "Sec-Fetch-Mode": "no-cors",
         "Sec-Fetch-Dest": "image",
-    })
+        "User-Agent": UA,
+    }
+    if referer_header:
+        base_headers["Referer"] = referer_header
+    if origin_header:
+        base_headers["Origin"] = origin_header
     if cookies:
         for cookie in cookies:
             name = cookie.get("name")
@@ -86,7 +89,8 @@ def download_images(
     saved_paths: List[Path] = []
     for i, raw_url in enumerate(urls, 1):
         url = _normalize_image_url(raw_url)
-        with sess.get(url, stream=True, timeout=45) as response:
+        headers = _per_request_headers(base_headers, referer_host, url)
+        with sess.get(url, stream=True, timeout=45, headers=headers) as response:
             content_type = response.headers.get("Content-Type")
             if response.status_code >= 400 and not _is_image_content_type(content_type):
                 response.raise_for_status()
@@ -115,19 +119,57 @@ def download_images(
         saved_paths.append(path)
     return saved_paths
 
-def _referer_and_origin(chapter_referer: Optional[str]) -> Tuple[str, str]:
+def _referer_and_origin(chapter_referer: Optional[str]) -> Tuple[str, Optional[str], Optional[str]]:
     if chapter_referer:
         try:
-            from urllib.parse import urlparse
-
             parsed = urlparse(chapter_referer)
-            if parsed.scheme in {"http", "https"} and parsed.netloc:
-                origin = f"{parsed.scheme}://{parsed.netloc}"
-                return chapter_referer, origin
         except Exception:
-            pass
+            parsed = None
+        if parsed and parsed.scheme in {"http", "https"} and parsed.netloc:
+            origin = f"{parsed.scheme}://{parsed.netloc}"
+            return chapter_referer, origin, parsed.netloc
     origin = BASE.rstrip("/")
-    return origin + "/", origin
+    parsed_origin = urlparse(origin)
+    host = parsed_origin.netloc if parsed_origin.netloc else None
+    return origin + "/", origin, host
+
+
+def _per_request_headers(
+    base_headers: Dict[str, str],
+    referer_host: Optional[str],
+    url: str,
+) -> Dict[str, str]:
+    headers = dict(base_headers)
+    target = urlparse(url)
+    target_host = target.netloc
+    sec_fetch_site = _sec_fetch_site(referer_host, target_host)
+    headers["Sec-Fetch-Site"] = sec_fetch_site
+    if sec_fetch_site != "same-origin":
+        headers.pop("Origin", None)
+    return headers
+
+
+def _sec_fetch_site(
+    referer_host: Optional[str],
+    target_host: Optional[str],
+) -> str:
+    if not referer_host or not target_host:
+        return "cross-site"
+    ref = referer_host.lower()
+    tgt = target_host.lower()
+    if ref == tgt:
+        return "same-origin"
+    if _is_same_site(ref, tgt):
+        return "same-site"
+    return "cross-site"
+
+
+def _is_same_site(a: str, b: str) -> bool:
+    a_parts = a.split(".")
+    b_parts = b.split(".")
+    if len(a_parts) < 2 or len(b_parts) < 2:
+        return False
+    return a_parts[-2:] == b_parts[-2:]
 
 def _ext_from_url(url: str) -> str:
     q = _normalize_image_url(url).split("?", 1)[0].lower()
