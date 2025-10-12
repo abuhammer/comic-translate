@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import random
 import re
 import shutil
 import tempfile
+import time
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -33,9 +35,34 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
                     "Chrome/122.0 Safari/537.36"
                 ),
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.9",
             }
         )
+
+    def _sleep_before_request(self) -> None:
+        """Sleep for a randomised delay to avoid rate-limiting."""
+
+        distribution = random.choice(("uniform", "normal", "exponential"))
+        if distribution == "uniform":
+            delay = random.uniform(0.75, 2.5)
+        elif distribution == "normal":
+            delay = max(0.25, random.gauss(1.5, 0.5))
+        else:  # exponential
+            delay = min(3.0, random.expovariate(1.0))
+        time.sleep(delay)
+
+    def _session_get(
+        self,
+        url: str,
+        *,
+        params: dict | None = None,
+        headers: dict | None = None,
+        timeout: int = 30,
+    ) -> requests.Response:
+        self._sleep_before_request()
+        response = self._session.get(url, params=params, headers=headers, timeout=timeout)
+        return response
 
     def _normalise_url(self, url: str) -> str:
         stripped = url.strip()
@@ -65,7 +92,7 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
             raise ValueError("Please provide a HappyMH reading or manga URL.")
 
         # Fetch the manga page to locate the reading link
-        response = self._session.get(url, timeout=30)
+        response = self._session_get(url, timeout=30)
         response.raise_for_status()
         html = response.text
 
@@ -108,7 +135,7 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
         if version:
             params["v"] = version
         headers = {"Referer": reading_url}
-        response = self._session.get(
+        response = self._session_get(
             "https://m.happymh.com/v2.0/apis/manga/reading",
             params=params,
             headers=headers,
@@ -134,7 +161,7 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
             return
 
         try:
-            html_response = self._session.get(reading_url, timeout=30)
+            html_response = self._session_get(reading_url, timeout=30)
             html_response.raise_for_status()
         except requests.RequestException as exc:
             self.error.emit(str(exc))
@@ -186,7 +213,11 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
 
         for index, img_url in enumerate(image_urls, start=1):
             try:
-                img_response = self._session.get(img_url, headers={"Referer": reading_url}, timeout=60)
+                img_response = self._session_get(
+                    img_url,
+                    headers={"Referer": reading_url},
+                    timeout=60,
+                )
                 img_response.raise_for_status()
             except requests.RequestException as exc:
                 self.error.emit(str(exc))
