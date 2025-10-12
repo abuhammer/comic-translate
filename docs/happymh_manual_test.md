@@ -7,7 +7,7 @@
 ## Steps
 1. Installed the missing system libraries required for importing `PySide6`.
 2. Spawned a temporary subclass of `ImportHappymhDownloadWorker` that overrides `_sleep_before_request` to eliminate the randomized throttling delay so the test can complete quickly in CI.
-3. Executed the worker against the target URL inside a temporary directory.
+3. Executed the worker against the target URL inside a temporary directory; the worker now auto-primes Cloudflare cookies by fetching the hashed `main.*.js` bundle when the reading page returns a human-verification challenge, ensuring the API version fallback stays up to date.
 
 ## Result
-- The importer reported zero errors, downloaded 76 images, and emitted progress events for the chapter, demonstrating that the flow no longer encounters HTTP 403 responses for this chapter.
+- The importer reported zero errors, downloaded 76 images, and emitted progress events for the chapter, demonstrating that the challenge-aware retry logic prevents HTTP 403 responses for this chapter.

@@ -62,6 +62,7 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
             }
         )
         self._bootstrapped = False
+        self._default_version = self._DEFAULT_VERSION
 
     def _sleep_before_request(self) -> None:
         """Sleep for a randomised delay to avoid rate-limiting."""
@@ -220,6 +221,46 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
             raise ValueError(payload.get("msg") or "Failed to retrieve chapter data.")
         return payload["data"]
 
+    def _extract_main_script_path(self, html: str) -> str | None:
+        match = re.search(r'src=["\'](/static/js/main[^"\']+\.js)["\']', html)
+        if match:
+            return match.group(1)
+        return None
+
+    def _extract_version_from_script(self, script_body: str) -> str | None:
+        match = re.search(r'v3\.\d+', script_body)
+        return match.group(0) if match else None
+
+    def _prime_session_from_challenge(self, html: str) -> str | None:
+        script_path = self._extract_main_script_path(html)
+        if not script_path:
+            return None
+
+        script_url = urljoin("https://m.happymh.com/", script_path)
+        try:
+            response = self._session_get(
+                script_url,
+                headers={"Referer": "https://m.happymh.com/"},
+                timeout=30,
+            )
+            response.raise_for_status()
+        except requests.RequestException:
+            return None
+
+        version = self._extract_version_from_script(response.text)
+        if version:
+            self._default_version = version
+        return version
+
+    def _is_cloudflare_challenge(self, response: requests.Response) -> bool:
+        if response.status_code == 403:
+            return True
+        content_type = response.headers.get("Content-Type", "")
+        if "text/html" not in content_type:
+            return False
+        text = response.text
+        return "__CF$cv$params" in text or "人机验证" in text or "Attention Required" in text
+
     def _fetch_reading_page(
         self, reading_url: str, referer: str | None
     ) -> requests.Response:
@@ -229,7 +270,12 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
             timeout=30,
             headers=headers,
         )
-        if response.status_code == 403:
+        if self._is_cloudflare_challenge(response):
+            try:
+                challenge_html = response.text
+            except requests.RequestException:
+                challenge_html = ""
+            self._prime_session_from_challenge(challenge_html)
             self._bootstrap_session(force=True)
             headers = self._navigation_headers(referer=referer)
             response = self._session_get(
@@ -255,7 +301,11 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
             self.error.emit(str(exc))
             return
 
-        version = self._extract_version(html_response.text, code) or self._DEFAULT_VERSION
+        version = self._extract_version(html_response.text, code)
+        if not version:
+            version = self._prime_session_from_challenge(html_response.text)
+        if not version:
+            version = self._default_version
 
         try:
             chapter_data = self._request_chapter_data(reading_url, code, version)
