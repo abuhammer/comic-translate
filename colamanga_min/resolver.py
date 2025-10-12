@@ -18,11 +18,19 @@ def get_chapter_images(chapter_url: str, timeout_ms: int = 15000) -> Tuple[List[
         ctx = browser.new_context(
             user_agent=UA,
             extra_http_headers={"Referer": BASE},
+            ignore_https_errors=True,
         )
         page = ctx.new_page()
         page.set_default_timeout(timeout_ms)
         page.goto(chapter_url, wait_until="domcontentloaded")
-        page.wait_for_timeout(600)
+        try:
+            page.wait_for_load_state("networkidle")
+        except Exception:
+            pass
+        try:
+            page.wait_for_selector("img[data-src], img[srcset], img[src]", timeout=timeout_ms)
+        except Exception:
+            page.wait_for_timeout(1000)
         script = RESOLVER_JS_PATH.read_text(encoding="utf-8")
         result = page.evaluate(script)
         if not result or not result.get("ok"):
@@ -45,6 +53,8 @@ def download_images(urls: List[str], dest_dir: Path, cookies: Optional[dict] = N
             c = requests.cookies.create_cookie(domain="www.colamanga.com", name=k, value=v, path="/")
             sess.cookies.set_cookie(c)
     for i, url in enumerate(urls, 1):
+        if url.startswith("//"):
+            url = "https:" + url
         ext = _ext_from_url(url)
         path = dest_dir / f"page_{i:03d}{ext}"
         with sess.get(url, stream=True, timeout=45) as r:

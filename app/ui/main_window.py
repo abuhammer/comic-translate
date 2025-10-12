@@ -195,6 +195,9 @@ class ComicTranslateUI(QtWidgets.QMainWindow):
         self.import_wfwf_action = self.tool_menu.addAction(
             MIcon("cloud_line.svg"), self.tr("Import from WFWF")
         )
+        self.import_colamanga_action = self.tool_menu.addAction(
+            MIcon("cloud_line.svg"), self.tr("Import from ColaManga")
+        )
 
         # Rest of the code remains the same
         self.save_browser = MClickSaveFileToolButton()

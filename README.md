@@ -111,8 +111,11 @@ uv run comic.py
 ```
 This will launch the GUI
 
+### Importing from ColaManga
+In the Home view, click the folder button and choose **Import from ColaManga** to paste a chapter URL and download the pages directly into a new project. If you need to script the download outside the GUI, call `import_colamanga_chapter` from the `colamanga_importer` module.
+
 ### Tips
-* If you have a CBR file, you'll need to install Winrar or 7-Zip then add the folder it's installed to (e.g "C:\Program Files\WinRAR" for Windows) to Path. If it's installed but not to Path, you may get the error, 
+* If you have a CBR file, you'll need to install Winrar or 7-Zip then add the folder it's installed to (e.g "C:\Program Files\WinRAR" for Windows) to Path. If it's installed but not to Path, you may get the error,
 ```bash
 raise RarCannotExec("Cannot find working tool")
 ```
