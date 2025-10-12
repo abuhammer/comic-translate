@@ -50,7 +50,7 @@ def download_images(
     dest_dir: Path,
     cookies: Optional[List[CookieDict]] = None,
     referer: Optional[str] = None,
-):
+) -> List[Path]:
     dest_dir.mkdir(parents=True, exist_ok=True)
     sess = requests.Session()
     referer_header = _normalize_referer(referer)
@@ -78,17 +78,20 @@ def download_images(
                 secure=secure,
             )
             sess.cookies.set_cookie(created)
-    for i, url in enumerate(urls, 1):
-        if url.startswith("//"):
-            url = "https:" + url
-        ext = _ext_from_url(url)
-        path = dest_dir / f"page_{i:03d}{ext}"
-        with sess.get(url, stream=True, timeout=45) as r:
-            r.raise_for_status()
+    saved_paths: List[Path] = []
+    for i, raw_url in enumerate(urls, 1):
+        url = _normalize_image_url(raw_url)
+        with sess.get(url, stream=True, timeout=45) as response:
+            if response.status_code >= 400 and not _is_image_response(response):
+                response.raise_for_status()
+            ext = _extension_from_response(url, response.headers.get("Content-Type"))
+            path = dest_dir / f"page_{i:03d}{ext}"
             with open(path, "wb") as f:
-                for chunk in r.iter_content(1 << 14):
+                for chunk in response.iter_content(1 << 14):
                     if chunk:
                         f.write(chunk)
+        saved_paths.append(path)
+    return saved_paths
 
 def _normalize_referer(chapter_referer: Optional[str]) -> str:
     if chapter_referer:
@@ -104,8 +107,40 @@ def _normalize_referer(chapter_referer: Optional[str]) -> str:
     return BASE.rstrip("/") + "/"
 
 def _ext_from_url(url: str) -> str:
-    q = url.split("?", 1)[0].lower()
+    q = _normalize_image_url(url).split("?", 1)[0].lower()
     for ext in (".jpg", ".jpeg", ".png", ".webp", ".avif"):
         if q.endswith(ext):
             return ext
     return ".jpg"
+
+
+def _normalize_image_url(url: str) -> str:
+    normalized = url.strip()
+    if normalized.startswith("//"):
+        normalized = "https:" + normalized
+    if ".enc." in normalized:
+        normalized = normalized.replace(".enc.", ".")
+    return normalized
+
+
+def _is_image_response(response: requests.Response) -> bool:
+    content_type = response.headers.get("Content-Type", "")
+    if content_type and "image" in content_type.lower():
+        return True
+    return False
+
+
+def _extension_from_response(url: str, content_type: Optional[str]) -> str:
+    if content_type:
+        lower = content_type.lower()
+        if "jpeg" in lower or "jpg" in lower:
+            return ".jpg"
+        if "png" in lower:
+            return ".png"
+        if "webp" in lower:
+            return ".webp"
+        if "gif" in lower:
+            return ".gif"
+        if "avif" in lower:
+            return ".avif"
+    return _ext_from_url(url)
