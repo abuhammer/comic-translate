@@ -1,7 +1,9 @@
-import json
+from io import BytesIO
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
+
 import requests
+from PIL import Image, UnidentifiedImageError
 from playwright.sync_api import sync_playwright
 
 BASE = "https://www.colamanga.com"
@@ -58,7 +60,7 @@ def download_images(
         "User-Agent": UA,
         "Referer": referer_header,
         "Origin": origin_header,
-        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "Accept": "image/jpeg,image/png,image/*;q=0.8,*/*;q=0.5",
         "Accept-Language": "en-US,en;q=0.9",
         "Sec-Fetch-Site": "same-origin",
         "Sec-Fetch-Mode": "no-cors",
@@ -85,14 +87,31 @@ def download_images(
     for i, raw_url in enumerate(urls, 1):
         url = _normalize_image_url(raw_url)
         with sess.get(url, stream=True, timeout=45) as response:
-            if response.status_code >= 400 and not _is_image_response(response):
+            content_type = response.headers.get("Content-Type")
+            if response.status_code >= 400 and not _is_image_content_type(content_type):
                 response.raise_for_status()
-            ext = _extension_from_response(url, response.headers.get("Content-Type"))
-            path = dest_dir / f"page_{i:03d}{ext}"
-            with open(path, "wb") as f:
-                for chunk in response.iter_content(1 << 14):
-                    if chunk:
-                        f.write(chunk)
+            if not _is_image_content_type(content_type):
+                raise RuntimeError(
+                    f"ColaManga image request returned a non-image payload: {url}"
+                )
+
+            ext = _extension_from_response(url, content_type)
+            data = bytearray()
+            for chunk in response.iter_content(1 << 14):
+                if chunk:
+                    data.extend(chunk)
+
+        data_bytes = bytes(data)
+        if _should_convert_from_webp(ext, content_type):
+            try:
+                data_bytes, ext = _convert_webp_bytes(data_bytes)
+            except UnidentifiedImageError as exc:
+                raise RuntimeError(
+                    f"Failed to decode ColaManga WEBP image from {url}"
+                ) from exc
+
+        path = dest_dir / f"page_{i:03d}{ext}"
+        path.write_bytes(data_bytes)
         saved_paths.append(path)
     return saved_paths
 
@@ -128,10 +147,13 @@ def _normalize_image_url(url: str) -> str:
 
 
 def _is_image_response(response: requests.Response) -> bool:
-    content_type = response.headers.get("Content-Type", "")
-    if content_type and "image" in content_type.lower():
-        return True
-    return False
+    return _is_image_content_type(response.headers.get("Content-Type"))
+
+
+def _is_image_content_type(content_type: Optional[str]) -> bool:
+    if not content_type:
+        return False
+    return "image" in content_type.lower()
 
 
 def _extension_from_response(url: str, content_type: Optional[str]) -> str:
@@ -148,3 +170,21 @@ def _extension_from_response(url: str, content_type: Optional[str]) -> str:
         if "avif" in lower:
             return ".avif"
     return _ext_from_url(url)
+
+
+def _should_convert_from_webp(ext: str, content_type: Optional[str]) -> bool:
+    lower = (content_type or "").lower()
+    return ext == ".webp" or "webp" in lower
+
+
+def _convert_webp_bytes(data: bytes) -> Tuple[bytes, str]:
+    with Image.open(BytesIO(data)) as image:
+        has_alpha = image.mode in {"RGBA", "LA"} or (
+            image.mode == "P" and "transparency" in image.info
+        )
+        output = BytesIO()
+        if has_alpha:
+            image.convert("RGBA").save(output, format="PNG")
+            return output.getvalue(), ".png"
+        image.convert("RGB").save(output, format="JPEG", quality=95)
+        return output.getvalue(), ".jpg"
