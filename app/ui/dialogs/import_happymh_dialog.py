@@ -31,23 +31,34 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
         self._session.headers.update(
             {
                 "User-Agent": (
-                    "Mozilla/5.0 (Linux; Android 12; Pixel 5) "
+                    "Mozilla/5.0 (Linux; Android 13; Pixel 5) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.6367.82 Mobile Safari/537.36"
+                    "Chrome/128.0.6613.120 Mobile Safari/537.36"
                 ),
                 "Accept": (
                     "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                    "image/avif,image/webp,image/apng,*/*;q=0.8"
+                    "image/avif,image/webp,image/apng,*/*;q=0.8,"
+                    "application/signed-exchange;v=b3;q=0.7"
                 ),
                 "Accept-Language": "en-US,en;q=0.9",
-                "Accept-Encoding": "gzip, deflate, br",
+                "Accept-Encoding": "gzip, deflate, br, zstd",
                 "Connection": "keep-alive",
                 "Cache-Control": "no-cache",
                 "Pragma": "no-cache",
-                "sec-ch-ua": '"Not.A/Brand";v="8", "Chromium";v="124", "Google Chrome";v="124"',
+                "sec-ch-ua": '"Not.A/Brand";v="8", "Chromium";v="128", "Google Chrome";v="128"',
                 "sec-ch-ua-mobile": "?1",
                 "sec-ch-ua-platform": '"Android"',
+                "sec-ch-ua-arch": '"arm"',
+                "sec-ch-ua-bitness": '"64"',
+                "sec-ch-ua-full-version": '"128.0.6613.120"',
+                "sec-ch-ua-full-version-list": (
+                    '"Not.A/Brand";v="8.0.0.0", "Chromium";v="128.0.6613.120", '
+                    '"Google Chrome";v="128.0.6613.120"'
+                ),
+                "sec-ch-ua-model": '"Pixel 5"',
+                "sec-ch-ua-platform-version": '"14.0.0"',
                 "Upgrade-Insecure-Requests": "1",
+                "TE": "trailers",
             }
         )
         self._bootstrapped = False
@@ -89,20 +100,25 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
             headers["Sec-Fetch-Site"] = "none"
         return headers
 
-    def _bootstrap_session(self) -> None:
-        if self._bootstrapped:
+    def _bootstrap_session(self, *, force: bool = False) -> None:
+        if self._bootstrapped and not force:
             return
+
         try:
-            self._session_get(
+            response = self._session_get(
                 "https://m.happymh.com/",
                 headers=self._navigation_headers(),
                 timeout=30,
             )
+            response.raise_for_status()
         except requests.RequestException:
             # The bootstrap request only exists to collect cookies/JS challenges.
-            pass
-        finally:
-            self._bootstrapped = True
+            if force:
+                # Allow callers to try another bootstrap attempt later.
+                self._bootstrapped = False
+            return
+
+        self._bootstrapped = True
 
     def _normalise_url(self, url: str) -> str:
         stripped = url.strip()
@@ -204,6 +220,25 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
             raise ValueError(payload.get("msg") or "Failed to retrieve chapter data.")
         return payload["data"]
 
+    def _fetch_reading_page(
+        self, reading_url: str, referer: str | None
+    ) -> requests.Response:
+        headers = self._navigation_headers(referer=referer)
+        response = self._session_get(
+            reading_url,
+            timeout=30,
+            headers=headers,
+        )
+        if response.status_code == 403:
+            self._bootstrap_session(force=True)
+            headers = self._navigation_headers(referer=referer)
+            response = self._session_get(
+                reading_url,
+                timeout=30,
+                headers=headers,
+            )
+        return response
+
     def run(self) -> None:  # noqa: D401
         try:
             normalised = self._normalise_url(self.url)
@@ -214,11 +249,7 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
             return
 
         try:
-            html_response = self._session_get(
-                reading_url,
-                timeout=30,
-                headers=self._navigation_headers(referer=referer),
-            )
+            html_response = self._fetch_reading_page(reading_url, referer)
             html_response.raise_for_status()
         except requests.RequestException as exc:
             self.error.emit(str(exc))
