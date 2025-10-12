@@ -33,15 +33,24 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
                 "User-Agent": (
                     "Mozilla/5.0 (Linux; Android 12; Pixel 5) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/123.0.0.0 Mobile Safari/537.36"
+                    "Chrome/124.0.6367.82 Mobile Safari/537.36"
                 ),
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "image/avif,image/webp,image/apng,*/*;q=0.8"
+                ),
                 "Accept-Language": "en-US,en;q=0.9",
                 "Accept-Encoding": "gzip, deflate, br",
                 "Connection": "keep-alive",
                 "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+                "sec-ch-ua": '"Not.A/Brand";v="8", "Chromium";v="124", "Google Chrome";v="124"',
+                "sec-ch-ua-mobile": "?1",
+                "sec-ch-ua-platform": '"Android"',
+                "Upgrade-Insecure-Requests": "1",
             }
         )
+        self._bootstrapped = False
 
     def _sleep_before_request(self) -> None:
         """Sleep for a randomised delay to avoid rate-limiting."""
@@ -67,6 +76,34 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
         response = self._session.get(url, params=params, headers=headers, timeout=timeout)
         return response
 
+    def _navigation_headers(self, *, referer: str | None = None) -> dict[str, str]:
+        headers = {
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-User": "?1",
+        }
+        if referer:
+            headers["Referer"] = referer
+            headers["Sec-Fetch-Site"] = "same-origin"
+        else:
+            headers["Sec-Fetch-Site"] = "none"
+        return headers
+
+    def _bootstrap_session(self) -> None:
+        if self._bootstrapped:
+            return
+        try:
+            self._session_get(
+                "https://m.happymh.com/",
+                headers=self._navigation_headers(),
+                timeout=30,
+            )
+        except requests.RequestException:
+            # The bootstrap request only exists to collect cookies/JS challenges.
+            pass
+        finally:
+            self._bootstrapped = True
+
     def _normalise_url(self, url: str) -> str:
         stripped = url.strip()
         if not stripped:
@@ -79,7 +116,7 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
             raise ValueError("The provided URL is not valid.")
         return stripped
 
-    def _extract_reading_url(self, url: str) -> tuple[str, str]:
+    def _extract_reading_url(self, url: str) -> tuple[str, str, str | None]:
         parsed = urlparse(url)
         domain = parsed.netloc.lower()
         if not domain.endswith("happymh.com"):
@@ -89,13 +126,17 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
         if path.startswith("/mangaread/"):
             code = path.split("/", 2)[2]
             reading_url = parsed._replace(path=f"/mangaread/{code}", query="", fragment="").geturl()
-            return reading_url, code
+            return reading_url, code, "https://m.happymh.com/"
 
         if not path.startswith("/manga/"):
             raise ValueError("Please provide a HappyMH reading or manga URL.")
 
         # Fetch the manga page to locate the reading link
-        response = self._session_get(url, timeout=30)
+        response = self._session_get(
+            url,
+            timeout=30,
+            headers=self._navigation_headers(referer="https://m.happymh.com/"),
+        )
         response.raise_for_status()
         html = response.text
 
@@ -107,7 +148,7 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
 
         reading_path = match.group(1)
         reading_url = urljoin(url, reading_path)
-        return reading_url, reading_path.rsplit("/", 1)[-1]
+        return reading_url, reading_path.rsplit("/", 1)[-1], url
 
     def _extract_version(self, html: str, code: str) -> str | None:
         patterns = [
@@ -141,6 +182,10 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
             "Referer": reading_url,
             "Accept": "application/json, text/plain, */*",
             "X-Requested-With": "XMLHttpRequest",
+            "Origin": "https://m.happymh.com",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Dest": "empty",
         }
         response = self._session_get(
             "https://m.happymh.com/v2.0/apis/manga/reading",
@@ -162,13 +207,18 @@ class ImportHappymhDownloadWorker(QtCore.QThread):
     def run(self) -> None:  # noqa: D401
         try:
             normalised = self._normalise_url(self.url)
-            reading_url, code = self._extract_reading_url(normalised)
+            self._bootstrap_session()
+            reading_url, code, referer = self._extract_reading_url(normalised)
         except (requests.RequestException, ValueError) as exc:
             self.error.emit(str(exc))
             return
 
         try:
-            html_response = self._session_get(reading_url, timeout=30)
+            html_response = self._session_get(
+                reading_url,
+                timeout=30,
+                headers=self._navigation_headers(referer=referer),
+            )
             html_response.raise_for_status()
         except requests.RequestException as exc:
             self.error.emit(str(exc))
