@@ -227,8 +227,11 @@ class OCRFactory:
     @staticmethod
     def _create_easy_ocr(settings) -> OCREngine:
         engine = EasyOCREngine()
+        # EasyOCR expects ISO language codes rather than english names. The
+        # simplified Chinese model is the most commonly used for comics, so we
+        # default to it and include English for mixed text bubbles.
         engine.initialize(
-            languages=['chinese'],
+            languages=['ch_sim', 'en'],
             use_gpu=settings.is_gpu_enabled(),
             expansion_percentage=5
         )
