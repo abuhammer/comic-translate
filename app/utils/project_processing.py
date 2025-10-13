@@ -8,12 +8,13 @@ from typing import Iterable
 from PySide6 import QtWidgets
 
 from app.ui.dayu_widgets.message import MMessage
+from app.ui.dialogs.import_colamanga_dialog import ImportColaMangaDialog
 from app.ui.dialogs.import_wfwf_dialog import ImportWFWFDialog
 
 
-def _copy_and_order_images(image_paths: Iterable[str]) -> list[str]:
+def _copy_and_order_images(image_paths: Iterable[str], prefix: str = "import_project_") -> list[str]:
     """Copy downloaded images to a dedicated temp directory in order."""
-    project_dir = tempfile.mkdtemp(prefix="wfwf_project_")
+    project_dir = tempfile.mkdtemp(prefix=prefix)
     ordered_files: list[str] = []
 
     for index, src in enumerate(image_paths, start=1):
@@ -48,7 +49,7 @@ def import_from_wfwf(main_window: QtWidgets.QWidget) -> None:
         return
 
     try:
-        ordered_files = _copy_and_order_images(downloaded_files)
+        ordered_files = _copy_and_order_images(downloaded_files, prefix="wfwf_project_")
     except OSError as exc:
         dialog.cleanup()
         MMessage.error(
@@ -64,6 +65,49 @@ def import_from_wfwf(main_window: QtWidgets.QWidget) -> None:
     main_window.image_ctrl.thread_load_images(ordered_files)
     MMessage.success(
         text=main_window.tr("WFWF images downloaded successfully."),
+        parent=main_window,
+        duration=3000,
+        closable=True,
+    )
+
+
+def import_from_colamanga(main_window: QtWidgets.QWidget) -> None:
+    """Launch the ColaManga import dialog and load the downloaded images."""
+
+    dialog = ImportColaMangaDialog(main_window)
+
+    if dialog.exec() != QtWidgets.QDialog.Accepted:
+        dialog.cleanup()
+        return
+
+    downloaded_files = dialog.get_downloaded_files()
+    if not downloaded_files:
+        dialog.cleanup()
+        MMessage.error(
+            text=main_window.tr("No images were downloaded from the provided ColaManga URL."),
+            parent=main_window,
+            duration=None,
+            closable=True,
+        )
+        return
+
+    try:
+        ordered_files = _copy_and_order_images(downloaded_files, prefix="colamanga_project_")
+    except OSError as exc:
+        dialog.cleanup()
+        MMessage.error(
+            text=main_window.tr("Failed to prepare downloaded images: {error}").format(error=str(exc)),
+            parent=main_window,
+            duration=None,
+            closable=True,
+        )
+        return
+
+    dialog.cleanup()
+
+    main_window.image_ctrl.thread_load_images(ordered_files)
+    MMessage.success(
+        text=main_window.tr("ColaManga chapter downloaded successfully."),
         parent=main_window,
         duration=3000,
         closable=True,
