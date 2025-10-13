@@ -7,6 +7,7 @@ from .microsoft_ocr import MicrosoftOCR
 from .google_ocr import GoogleOCR
 from .gpt_ocr import GPTOCR
 from .ppocr import PPOCRv5Engine
+from .easy_ocr import EasyOCREngine
 from .manga_ocr.onnx_engine import MangaOCREngineONNX
 from .pororo.onnx_engine import PororoOCREngineONNX  
 from .gemini_ocr import GeminiOCR
@@ -136,7 +137,7 @@ class OCRFactory:
         language_factories = {
             'Japanese': lambda s: cls._create_manga_ocr(s, backend),
             'Korean': lambda s: cls._create_pororo_ocr(s, backend),
-            'Chinese': lambda s: cls._create_ppocr(s, 'ch'),
+            'Chinese': lambda s: cls._create_easy_ocr(s),
             'Russian': lambda s: cls._create_ppocr(s, 'ru'),
             'French': lambda s: cls._create_ppocr(s, 'latin'),
             'English': lambda s: cls._create_ppocr(s, 'en'),
@@ -216,9 +217,19 @@ class OCRFactory:
         engine = PPOCRv5Engine()
         engine.initialize(lang=lang, device=device)
         return engine
-    
+
     @staticmethod
     def _create_gemini_ocr(settings, model) -> OCREngine:
         engine = GeminiOCR()
         engine.initialize(settings, model)
+        return engine
+
+    @staticmethod
+    def _create_easy_ocr(settings) -> OCREngine:
+        engine = EasyOCREngine()
+        engine.initialize(
+            languages=['chinese'],
+            use_gpu=settings.is_gpu_enabled(),
+            expansion_percentage=5
+        )
         return engine
