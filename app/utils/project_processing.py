@@ -8,6 +8,7 @@ from typing import Iterable
 from PySide6 import QtWidgets
 
 from app.ui.dayu_widgets.message import MMessage
+from app.ui.dialogs.import_happymh_dialog import ImportHappymhDialog
 from app.ui.dialogs.import_wfwf_dialog import ImportWFWFDialog
 
 
@@ -64,6 +65,48 @@ def import_from_wfwf(main_window: QtWidgets.QWidget) -> None:
     main_window.image_ctrl.thread_load_images(ordered_files)
     MMessage.success(
         text=main_window.tr("WFWF images downloaded successfully."),
+        parent=main_window,
+        duration=3000,
+        closable=True,
+    )
+
+
+def import_from_happymh(main_window: QtWidgets.QWidget) -> None:
+    """Launch the HappyMH import dialog and load the downloaded images."""
+    dialog = ImportHappymhDialog(main_window)
+
+    if dialog.exec() != QtWidgets.QDialog.Accepted:
+        dialog.cleanup()
+        return
+
+    downloaded_files = dialog.get_downloaded_files()
+    if not downloaded_files:
+        dialog.cleanup()
+        MMessage.error(
+            text=main_window.tr("No images were downloaded from the provided URL."),
+            parent=main_window,
+            duration=None,
+            closable=True,
+        )
+        return
+
+    try:
+        ordered_files = _copy_and_order_images(downloaded_files)
+    except OSError as exc:
+        dialog.cleanup()
+        MMessage.error(
+            text=main_window.tr("Failed to prepare downloaded images: {error}").format(error=str(exc)),
+            parent=main_window,
+            duration=None,
+            closable=True,
+        )
+        return
+
+    dialog.cleanup()
+
+    main_window.image_ctrl.thread_load_images(ordered_files)
+    MMessage.success(
+        text=main_window.tr("HappyMH images downloaded successfully."),
         parent=main_window,
         duration=3000,
         closable=True,
