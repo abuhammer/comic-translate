@@ -301,23 +301,24 @@ class WebtoonLayoutManager:
         """Convert scene coordinates to page-local coordinates."""
         page_index = self.get_page_at_position(scene_pos.y())
         if 0 <= page_index < len(self.image_positions):
-            page_y = self.image_positions[page_index]
-            # This would need image data to calculate page width - delegate to coordinate converter
-            local_x = scene_pos.x()  # Simplified for now
-            local_y = scene_pos.y() - page_y
-            return page_index, QPointF(local_x, local_y)
+            if self.coordinate_converter is not None:
+                local_pos = self.coordinate_converter.scene_to_page_local_position(scene_pos, page_index)
+            else:
+                page_y = self.image_positions[page_index]
+                local_pos = QPointF(scene_pos.x(), scene_pos.y() - page_y)
+            return page_index, local_pos
         return page_index, scene_pos
-    
+
     def page_to_scene_coordinates(self, page_index: int, local_pos: QPointF) -> QPointF:
         """Convert page-local coordinates to scene coordinates."""
         if not (0 <= page_index < len(self.image_positions)):
             return local_pos
-        
+
+        if self.coordinate_converter is not None:
+            return self.coordinate_converter.page_local_to_scene_position(local_pos, page_index)
+
         page_y = self.image_positions[page_index]
-        # This would need image data to calculate page width - delegate to coordinate converter
-        scene_x = local_pos.x()  # Simplified for now
-        scene_y = local_pos.y() + page_y
-        return QPointF(scene_x, scene_y)
+        return QPointF(local_pos.x(), local_pos.y() + page_y)
     
     def clear(self):
         """Clear all layout state."""

@@ -320,6 +320,13 @@ def manual_wrap(
     init_font_size = render_settings.max_font_size
     min_font_size = render_settings.min_font_size
 
+    metadata = None
+    text_controller = getattr(main_page, "text_ctrl", None)
+    if text_controller is not None:
+        metadata = getattr(text_controller, "_adaptive_background_metadata", None)
+
+    block_mappings = metadata.get("block_map") if isinstance(metadata, dict) else None
+
     for blk in blk_list:
         x1, y1, width, height = blk.xywh
 
@@ -329,9 +336,29 @@ def manual_wrap(
 
         detected = False
         analysis = None
+        block_for_analysis = blk
+        if (
+            auto_font_color
+            and background_image is not None
+            and isinstance(block_mappings, dict)
+            and id(blk) in block_mappings
+        ):
+            entry = block_mappings[id(blk)]
+            try:
+                block_for_analysis = blk.deep_copy()
+                block_for_analysis.xyxy = np.array(entry["bbox"], dtype=np.float32)
+                if getattr(block_for_analysis, "bubble_xyxy", None) is not None:
+                    bubble_bbox = entry.get("bubble")
+                    if bubble_bbox is not None:
+                        block_for_analysis.bubble_xyxy = np.array(
+                            bubble_bbox, dtype=np.float32
+                        )
+            except Exception:
+                block_for_analysis = blk
+
         if auto_font_color and background_image is not None:
             try:
-                analysis = analyse_block_colors(background_image, blk)
+                analysis = analyse_block_colors(background_image, block_for_analysis)
             except Exception:
                 analysis = None
 
